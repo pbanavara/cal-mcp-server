@@ -1,146 +1,177 @@
-import { MCPNotification, MCPClient, GmailMessage } from './types';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { GmailMonitor } from './gmail-monitor';
 import { tokenManager } from './token-manager';
+import { setNotifyCallback, startWebhookServer } from './webhook-server';
 
-export class MCPServer {
-  private clients: Map<string, MCPClient> = new Map();
-  private gmailMonitor: GmailMonitor;
-  private isRunning: boolean = false;
-
-  constructor() {
-    this.gmailMonitor = new GmailMonitor((message: GmailMessage) => {
-      this.handleNewEmail(message);
-    });
-
-    this.setupServer();
-  }
-
-  private setupServer(): void {
-    // For now, we'll use a simpler approach
-    // The MCP SDK API might have changed, so we'll focus on basic functionality
-    console.log('🔧 MCP server setup complete');
-  }
-
-  public async start(): Promise<void> {
-    if (this.isRunning) {
-      console.log('⚠️  MCP server is already running');
-      return;
+// Initialize MCP server
+const mcp = new McpServer(
+  {
+    name: 'mcp-email-agent',
+    version: '1.0.0',
+      title: 'MCP Email Agent',
+      description: 'MCP server for Gmail email monitoring and meeting detection',
     }
+  );
 
-    try {
-      // Check for tokens
-      if (!tokenManager.hasTokens()) {
-        console.error('❌ No tokens available. Please authenticate in the web app first.');
-        return;
-      }
+const gmailMonitor = new GmailMonitor(() => { });
+async () => {
+  const initialized = await gmailMonitor.initialize();
+  // Start the webhook server for gmail notifications
+  if (!initialized) {
+    console.error("Failed to initialize Gmail monitor.");
+  }
+  setNotifyCallback((messageId) => {
+    console.error(`New email received: ${messageId}`);
 
-      // Initialize Gmail monitor
-      const initialized = await this.gmailMonitor.initialize();
-      if (!initialized) {
-        console.error('❌ Failed to initialize Gmail monitor');
-        return;
-      }
+  });
+  startWebhookServer();
+}
 
-      // Start Gmail watching (polling mode for now)
-      console.log('📧 Starting Gmail monitoring in polling mode...');
-      
-      this.isRunning = true;
-      console.log('🚀 MCP server started successfully');
-      console.log('📧 Gmail monitoring active (polling every 30 seconds)');
-      console.log('📡 Ready for client connections');
 
-      // Start periodic checks for new messages
-      this.startPeriodicChecks();
-
-    } catch (error) {
-      console.error('❌ Failed to start MCP server:', error);
+// Start watching for new emails
+mcp.tool(
+  "start_watching_for_new_emails",
+  "Start watching for new emails",
+  {
+    parameters: {},
+  },
+  async () => {
+    const watching = await gmailMonitor.startWatching();
+    if (!watching) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Failed to start watching for new emails."
+          }
+        ]
+      };
     }
-  }
-
-  public async stop(): Promise<void> {
-    if (!this.isRunning) {
-      return;
-    }
-
-    try {
-      // Stop Gmail watching
-      await this.gmailMonitor.stopWatching();
-      
-      // Close all client connections
-      this.clients.clear();
-      
-      this.isRunning = false;
-      console.log('✅ MCP server stopped');
-    } catch (error) {
-      console.error('❌ Error stopping MCP server:', error);
-    }
-  }
-
-  private async handleNewEmail(message: GmailMessage): Promise<void> {
-    const notification: MCPNotification = {
-      type: 'email_received',
-      data: {
-        messageId: message.id,
-        subject: this.getSubject(message),
-        sender: this.getSender(message),
-        receivedAt: new Date(parseInt(message.internalDate)).toISOString(),
-        snippet: message.snippet,
-      },
-    };
-
-    console.log(`📧 New email received: ${notification.data.subject}`);
-    console.log(`📧 From: ${notification.data.sender}`);
-    console.log(`📧 Snippet: ${notification.data.snippet}`);
-
-    // For now, just log the notification
-    // In the future, this will send to MCP clients
-    console.log('📤 MCP Notification would be sent here');
-  }
-
-  private getSubject(message: GmailMessage): string {
-    if (!message.payload?.headers) {
-      return 'No subject';
-    }
-
-    const subjectHeader = message.payload.headers.find(
-      header => header.name.toLowerCase() === 'subject'
-    );
-    
-    return subjectHeader?.value || 'No subject';
-  }
-
-  private getSender(message: GmailMessage): string {
-    if (!message.payload?.headers) {
-      return 'Unknown sender';
-    }
-
-    const fromHeader = message.payload.headers.find(
-      header => header.name.toLowerCase() === 'from'
-    );
-    
-    return fromHeader?.value || 'Unknown sender';
-  }
-
-  private startPeriodicChecks(): void {
-    // Check for new messages every 30 seconds
-    setInterval(async () => {
-      if (this.isRunning) {
-        await this.gmailMonitor.checkForNewMessages();
-      }
-    }, 30000);
-
-    console.log('⏰ Started periodic email checks (every 30 seconds)');
-  }
-
-  public getStatus(): {
-    isRunning: boolean;
-    clientCount: number;
-    gmailStatus: any;
-  } {
     return {
-      isRunning: this.isRunning,
-      clientCount: this.clients.size,
-      gmailStatus: this.gmailMonitor.getStatus(),
+      content: [
+        {
+          type: "text",
+          text: "Started watching for new emails."
+        }
+      ]
     };
   }
-} 
+);
+
+// Register "get_recent_emails" tool
+mcp.tool(
+  "get_email_alerts",
+  "Get email alerts in detail",
+  {
+    parameters: {},
+  },
+  async () => {
+    const token = tokenManager.getToken();
+    if (!token) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No tokens available. Please authenticate in the web app first."
+          }
+        ]
+      };
+    }
+
+    const gmailMonitor = new GmailMonitor(() => {});
+    const initialized = await gmailMonitor.initialize();
+    if (!initialized) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Failed to initialize Gmail monitor."
+          }
+        ]
+      };
+    }
+
+    // Fetch the 5 most recent emails from the INBOX
+    const gmail = gmailMonitor['gmail'];
+    if (!gmail) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Gmail client not initialized."
+          }
+        ]
+      };
+    }
+
+    try {
+      const res = await gmail.users.messages.list({
+        userId: 'me',
+        maxResults: 5,
+        labelIds: ['INBOX'],
+      });
+
+      const messages = res.data.messages || [];
+      if (messages.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No recent emails found."
+            }
+          ]
+        };
+      }
+
+      // Fetch full details for each message
+      const emailContents = [];
+      for (const msg of messages) {
+        const fullMsg = await gmail.users.messages.get({ userId: 'me', id: msg.id });
+        const payload = fullMsg.data.payload;
+        const headers = payload?.headers || [];
+        const subject = headers.find((h: { name: string; value: string }) => h.name.toLowerCase() === 'subject')?.value || 'No subject';
+        const from = headers.find((h: { name: string; value: string }) => h.name.toLowerCase() === 'from')?.value || 'Unknown sender';
+        const snippet = fullMsg.data.snippet || '';
+        emailContents.push({
+          type: "text",
+          text: `Subject: ${subject}\nFrom: ${from}\nSnippet: ${snippet}`
+        });
+      }
+
+      return {
+        content: emailContents.map(email => ({
+          type: "text",
+          text: email.text
+        }))
+      };
+
+    } catch (err) {
+      let msg = "Unknown error";
+      if (err && typeof err === "object" && "message" in err && typeof (err as any).message === "string") {
+        msg = (err as any).message;
+      } else if (typeof err === "string") {
+        msg = err;
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error fetching emails: " + msg
+          }
+        ]
+      };
+    }
+  }
+);
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await mcp.connect(transport);
+  console.error("Email MCP Server running on stdio");
+}
+
+main().catch((error) => {
+  console.error("Fatal error in main():", error);
+  process.exit(1);
+});

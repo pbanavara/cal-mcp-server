@@ -21,22 +21,27 @@ export class GmailMonitor {
   public async initialize(): Promise<boolean> {
     const token = tokenManager.getToken();
     if (!token) {
-      console.error('❌ No tokens available for Gmail monitoring');
+      console.error('No tokens available for Gmail monitoring');
       return false;
     }
 
     if (tokenManager.isTokenExpired(token)) {
-      console.error('❌ Token is expired. Please re-authenticate in the web app.');
+      console.error('Token is expired. Please re-authenticate in the web app.');
       return false;
     }
 
-    // Initialize Gmail API client
-    const oauth2Client = new google.auth.OAuth2();
+    // Initialize Gmail API client with client credentials
+    const oauth2Client = new google.auth.OAuth2(
+      token.client_id,
+      token.client_secret,
+      token.token_uri
+    );
+    
     oauth2Client.setCredentials({
       access_token: token.access_token,
       refresh_token: token.refresh_token,
-      scope: token.scope,
-      token_type: token.token_type,
+      scope: token.scopes?.join(' ') || token.scope || 'https://www.googleapis.com/auth/gmail.readonly',
+      token_type: token.token_type || null,
       expiry_date: token.expiry_date,
     });
 
@@ -46,23 +51,23 @@ export class GmailMonitor {
       // Get current history ID
       const profile = await this.gmail.users.getProfile({ userId: 'me' });
       this.currentHistoryId = profile.data.historyId;
-      console.log(`✅ Gmail monitor initialized. Current history ID: ${this.currentHistoryId}`);
-      console.log(`📡 Pub/Sub topic: ${this.pubsubTopic}`);
+      console.error(`Gmail monitor initialized. Current history ID: ${this.currentHistoryId}`);
+      console.error(`Pub/Sub topic: ${this.pubsubTopic}`);
       return true;
     } catch (error) {
-      console.error('❌ Failed to initialize Gmail monitor:', error);
+      console.error('Failed to initialize Gmail monitor:', error);
       return false;
     }
   }
 
   public async startWatching(): Promise<boolean> {
     if (!this.gmail) {
-      console.error('❌ Gmail client not initialized');
+      console.error('Gmail client not initialized');
       return false;
     }
 
     try {
-      console.log(`🔄 Starting Gmail watch with Pub/Sub topic: ${this.pubsubTopic}`);
+      console.error(`Starting Gmail watch with Pub/Sub topic: ${this.pubsubTopic}`);
       
       // Start watching for changes
       const watchResponse = await this.gmail.users.watch({
@@ -76,14 +81,14 @@ export class GmailMonitor {
       this.watchExpiration = watchResponse.data.expiration;
       this.isWatching = true;
       
-      console.log(`✅ Gmail watch started successfully!`);
-      console.log(`⏰ Watch expires: ${this.watchExpiration}`);
-      console.log(`📧 Monitoring for new emails via Pub/Sub...`);
+      console.error(`Gmail watch started successfully!`);
+      console.error(`Watch expires: ${this.watchExpiration}`);
+      console.error(`Monitoring for new emails via Pub/Sub...`);
       
       return true;
     } catch (error) {
-      console.error('❌ Failed to start Gmail watch:', error);
-      console.error('💡 Make sure:');
+      console.error('Failed to start Gmail watch:', error);
+      console.error('Make sure:');
       console.error('   1. Your Pub/Sub topic exists: ' + this.pubsubTopic);
       console.error('   2. Gmail API has permission to publish to the topic');
       console.error('   3. Your service account has proper permissions');
@@ -100,9 +105,9 @@ export class GmailMonitor {
       await this.gmail.users.stop({ userId: 'me' });
       this.isWatching = false;
       this.watchExpiration = null;
-      console.log('✅ Gmail watch stopped');
+      console.error('Gmail watch stopped');
     } catch (error) {
-      console.error('❌ Failed to stop Gmail watch:', error);
+      console.error('Failed to stop Gmail watch:', error);
     }
   }
 
@@ -134,7 +139,7 @@ export class GmailMonitor {
               });
 
               const gmailMessage = fullMessage.data as GmailMessage;
-              console.log(`📧 New email received: ${this.getSubject(gmailMessage)}`);
+              console.error(`New email received: ${this.getSubject(gmailMessage)}`);
               
               // Notify about the new message
               this.onMessageReceived(gmailMessage);
@@ -146,7 +151,7 @@ export class GmailMonitor {
         this.currentHistoryId = history.historyId;
       }
     } catch (error) {
-      console.error('❌ Error checking for new messages:', error);
+      console.error('Error checking for new messages:', error);
     }
   }
 
@@ -183,7 +188,7 @@ export class GmailMonitor {
       
       // Refresh if expiring within 5 minutes
       if (expirationTime - now < 5 * 60 * 1000) {
-        console.log('🔄 Refreshing Gmail watch...');
+        console.error('Refreshing Gmail watch...');
         await this.stopWatching();
         await this.startWatching();
       }

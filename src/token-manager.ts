@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 import { TokenData } from './types';
 
 export class TokenManager {
@@ -9,7 +8,8 @@ export class TokenManager {
 
   private constructor() {
     // Path to the web app's token storage (updated for new structure)
-    this.tokenFilePath = path.join(process.cwd(), '..', 'mcp-webapp', 'tokens', 'mcp_tokens.json');
+    this.tokenFilePath = '/Users/pbanavara/dev/mcp_email_agent/mcp-webapp/tokens/mcp_tokens.json';
+    console.error(`Token file: ${this.tokenFilePath}`);
     this.loadTokens();
   }
 
@@ -26,18 +26,24 @@ export class TokenManager {
         const data = fs.readFileSync(this.tokenFilePath, 'utf8');
         const tokenData = JSON.parse(data);
         
-        // Convert to Map if it's an object
+        // Support both map-of-emails and flat token formats
         if (typeof tokenData === 'object' && !Array.isArray(tokenData)) {
-          Object.entries(tokenData).forEach(([email, token]) => {
-            this.tokens.set(email, token as TokenData);
-          });
+          if ('access_token' in tokenData || 'token' in tokenData) {
+            // Flat Google token format
+            this.tokens.set('default', tokenData as TokenData);
+          } else {
+            // Map of emails format
+            Object.entries(tokenData).forEach(([email, token]) => {
+              this.tokens.set(email, token as TokenData);
+            });
+          }
         }
-        console.log(`✅ Loaded ${this.tokens.size} token(s) from web app storage`);
+        console.error(`Loaded ${this.tokens.size} token(s) from web app storage`);
       } else {
-        console.log(`⚠️  Token file not found at: ${this.tokenFilePath}`);
+        console.error(`Token file not found at: ${this.tokenFilePath}`);
       }
     } catch (error) {
-      console.error('❌ Error loading tokens:', error);
+      console.error('Error loading tokens:', error);
     }
   }
 
