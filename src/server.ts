@@ -1,4 +1,4 @@
-import { MCPServer } from './mcp-server';
+import { MCPServer } from './mcp-server-web';
 import { tokenManager } from './token-manager';
 
 async function main() {

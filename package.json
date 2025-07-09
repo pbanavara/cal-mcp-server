@@ -5,17 +5,19 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts",
+    "remote": "ts-node src/mcp-server-remote.ts",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
     "webhook": "ts-node src/webhook-server.ts",
-    "configure": "node scripts/configure-pubsub.js",
-    "mcp-server": "ts-node src/mcp-server.ts"
+    "configure": "node scripts/configure-pubsub.js"
   },
   "dependencies": {
     "@google-cloud/pubsub": "^5.1.0",
-    "@modelcontextprotocol/sdk": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.15.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
+    "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "googleapis": "^128.0.0",
     "node-cron": "^3.0.3",

@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { GmailMessage, GmailHistoryResponse } from './types';
 import { tokenManager } from './token-manager';
+import 'dotenv/config';
 
 export class GmailMonitor {
   private gmail: any;
@@ -111,9 +112,11 @@ export class GmailMonitor {
     }
   }
 
-  public async checkForNewMessages(): Promise<void> {
+  public async checkForNewMessages(): Promise<GmailMessage[]> {
+    const newMessages: GmailMessage[] = [];
     if (!this.gmail || !this.currentHistoryId) {
-      return;
+      console.log('Gmail client not initialized or current history ID not set');
+      return newMessages;
     }
 
     try {
@@ -125,7 +128,7 @@ export class GmailMonitor {
       });
 
       const history = historyResponse.data as GmailHistoryResponse;
-      
+      console.log('History response:', history);
       if (history.history && history.history.length > 0) {
         for (const historyItem of history.history) {
           if (historyItem.messagesAdded) {
@@ -139,9 +142,7 @@ export class GmailMonitor {
               });
 
               const gmailMessage = fullMessage.data as GmailMessage;
-              console.error(`New email received: ${this.getSubject(gmailMessage)}`);
-              
-              // Notify about the new message
+              newMessages.push(gmailMessage);
               this.onMessageReceived(gmailMessage);
             }
           }
@@ -153,18 +154,7 @@ export class GmailMonitor {
     } catch (error) {
       console.error('Error checking for new messages:', error);
     }
-  }
-
-  private getSubject(message: GmailMessage): string {
-    if (!message.payload?.headers) {
-      return 'No subject';
-    }
-
-    const subjectHeader = message.payload.headers.find(
-      header => header.name.toLowerCase() === 'subject'
-    );
-    
-    return subjectHeader?.value || 'No subject';
+    return newMessages;
   }
 
   public getStatus(): {
