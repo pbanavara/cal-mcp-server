@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { GmailMonitor } from './gmail-monitor';
 import { tokenManager } from './token-manager';
 import { setNotifyCallback, startWebhookServer } from './webhook-server';
+import { jwtAuthMiddleware, AuthenticatedRequest } from './jwt-auth-middleware';
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
@@ -130,45 +131,6 @@ mcp.tool(
         }
       ]
     };
-  }
-);
-
-mcp.tool(
-  "get_recent_emails",
-  "Get recent emails from Gmail",
-  {
-    parameters: {
-      type: "object",
-      properties: {
-        maxResults: {
-          type: "number",
-          description: "Maximum number of emails to retrieve (default: 10)",
-          default: 10
-        }
-      }
-    },
-  },
-  async ({ maxResults = 10 }) => {
-    try {
-      // For now, return a placeholder since getRecentEmails doesn't exist
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Recent emails feature not yet implemented. Requested ${maxResults} emails.`
-          }
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error retrieving emails: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
   }
 );
 
@@ -339,11 +301,12 @@ async function main() {
   // Connect MCP server to transport
   await mcp.connect(transport);
   
-  // MCP endpoint
-  app.post('/mcp', async (req, res) => {
+  // MCP endpoint with JWT authentication
+  app.post('/mcp', jwtAuthMiddleware.authenticateJWT, async (req: AuthenticatedRequest, res) => {
     console.log('🔧 POST /mcp received');
     console.log('Headers:', req.headers);
     console.log('Body:', JSON.stringify(req.body, null, 2));
+    console.log(`👤 Authenticated user: ${req.user?.email}`);
     
     try {
       await transport.handleRequest(req, res, req.body);
@@ -363,9 +326,10 @@ async function main() {
     }
   });
 
-  app.get('/mcp', async (req, res) => {
+  app.get('/mcp', jwtAuthMiddleware.authenticateJWT, async (req: AuthenticatedRequest, res) => {
     console.log('🔧 GET /mcp received');
     console.log('Headers:', req.headers);
+    console.log(`👤 Authenticated user: ${req.user?.email}`);
     
     try {
       await transport.handleRequest(req, res);
