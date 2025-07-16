@@ -9,7 +9,7 @@ export interface AuthenticatedRequest extends Request {
     access_token: string;
     refresh_token: string;
     expiry_date: number;
-    scopes: string[];
+    scopes?: string[];
   };
 }
 
@@ -17,35 +17,37 @@ export class JWTAuthMiddleware {
   private readonly secret: string;
 
   constructor() {
-    this.secret = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET || 'fallback-secret-key';
+    this.secret = process.env['JWT_SECRET'] || process.env['NEXTAUTH_SECRET'] || 'fallback-secret-key';
   }
 
   /**
    * Middleware to authenticate JWT tokens
    */
-  public authenticateJWT = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  public authenticateJWT = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
       // Get JWT from Authorization header or environment variable
       const authHeader = req.headers.authorization;
       const jwtToken = authHeader?.startsWith('Bearer ') 
         ? authHeader.substring(7) 
-        : process.env.REKURA_JWT_TOKEN;
+        : process.env['REKURA_JWT_TOKEN'];
 
       if (!jwtToken) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Missing JWT token',
           message: 'Please provide JWT token in Authorization header or REKURA_JWT_TOKEN environment variable'
         });
+        return;
       }
 
       // Verify JWT
       const decoded = jwt.verify(jwtToken, this.secret) as JWTPayload;
       
       if (!decoded.jti) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Invalid JWT token',
           message: 'JWT token missing JTI (JWT ID)'
         });
+        return;
       }
 
       // Fetch Google tokens from storage
@@ -53,18 +55,20 @@ export class JWTAuthMiddleware {
       const tokenRecord = await storageService.getTokens(decoded.jti);
 
       if (!tokenRecord) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Tokens not found',
           message: 'Google tokens not found for this JWT. Please re-authenticate in the web app.'
         });
+        return;
       }
 
       // Check if Google tokens are expired
       if (Date.now() >= tokenRecord.google_tokens.expiry_date) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Google tokens expired',
           message: 'Google OAuth tokens have expired. Please re-authenticate in the web app.'
         });
+        return;
       }
 
       // Attach user and tokens to request
@@ -78,39 +82,43 @@ export class JWTAuthMiddleware {
       console.error('JWT authentication failed:', error);
       
       if (error instanceof jwt.JsonWebTokenError) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Invalid JWT token',
           message: 'JWT token is invalid or expired'
         });
+        return;
       }
       
       if (error instanceof jwt.TokenExpiredError) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'JWT token expired',
           message: 'JWT token has expired. Please re-authenticate in the web app.'
         });
+        return;
       }
 
-      return res.status(500).json({ 
+      res.status(500).json({ 
         error: 'Authentication error',
         message: 'Internal server error during authentication'
       });
+      return;
     }
   };
 
   /**
    * Optional authentication - doesn't fail if no token provided
    */
-  public optionalAuth = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  public optionalAuth = async (req: AuthenticatedRequest, _res: Response, next: NextFunction): Promise<void> => {
     try {
       const authHeader = req.headers.authorization;
       const jwtToken = authHeader?.startsWith('Bearer ') 
         ? authHeader.substring(7) 
-        : process.env.REKURA_JWT_TOKEN;
+        : process.env['REKURA_JWT_TOKEN'];
 
       if (!jwtToken) {
         // No token provided, continue without authentication
-        return next();
+        next();
+        return;
       }
 
       // Try to authenticate, but don't fail if it doesn't work

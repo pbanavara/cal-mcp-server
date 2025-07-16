@@ -10,6 +10,17 @@ export interface GmailMessage {
   sizeEstimate: number;
 }
 
+// JWT Types
+export interface JWTPayload {
+  jti: string; // JWT ID
+  email: string;
+  name?: string;
+  picture?: string;
+  iat?: number; // Issued at
+  exp?: number; // Expiration time
+  sub?: string; // Subject
+}
+
 export interface GmailMessagePart {
   partId: string;
   mimeType: string;
