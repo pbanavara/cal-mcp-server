@@ -8,6 +8,9 @@ import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
 import { GmailMessage } from './types';
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
+import { setupMcpServer } from './mcp-mcp-logic';
+
 
 // SSE clients management
 interface SSEClient {
@@ -16,7 +19,7 @@ interface SSEClient {
   userEmail?: string | undefined;
 }
 
-class SSEManager {
+export class SSEManager {
   private clients: Map<string, SSEClient> = new Map();
 
   addClient(clientId: string, res: any, userEmail?: string): void {
@@ -69,14 +72,14 @@ let isStreamingMode = false;
 let streamingRes: any = null;
 
 // Initialize MCP server
-const mcp = new McpServer(
-  {
-    name: 'mcp-email-agent',
-    version: '1.0.0',
-    title: 'MCP Email Agent',
-    description: 'Remote MCP server for Gmail email monitoring and meeting detection',
-  }
-);
+// const mcp = new McpServer(
+//   {
+//     name: 'mcp-email-agent',
+//     version: '1.0.0',
+//     title: 'MCP Email Agent',
+//     description: 'Remote MCP server for Gmail email monitoring and meeting detection',
+//   }
+// );
 
 const gmailMonitor = new GmailMonitor(onNewGmailMessage);
 
@@ -144,264 +147,15 @@ async function initializeGmailMonitor() {
 
 // MCP Tools
 
-mcp.tool(
-  "start_watching_for_new_emails",
-  "Start polling for new emails using Gmail API",
-  {
-    parameters: {},
-  },
-  async () => {
-    gmailMonitor.startPolling(60000); // Poll every 60 seconds
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Started polling for new emails."
-        }
-      ]
-    };
-  }
-);
+// After creating each McpServer, GmailMonitor, and SSEManager, call setupMcpServer
+// For each session/transport block where you create a new McpServer:
+// const server = new McpServer({
+//   name: "example-server",
+//   version: "1.0.0"
+// });
+// setupMcpServer(server, gmailMonitor, sseManager);
 
-mcp.tool(
-  "stop_watching_for_new_emails",
-  "Stop polling for new emails and exit streaming mode",
-  {
-    parameters: {},
-  },
-  async () => {
-    gmailMonitor.stopPolling();
-    
-    // Exit streaming mode
-    if (isStreamingMode && streamingRes) {
-      try {
-        const stopResponse = {
-          jsonrpc: '2.0',
-          method: 'notifications/notify',
-          params: {
-            notification: {
-              type: 'email_monitoring_stopped',
-              message: 'Email monitoring stopped. Returning to regular mode.'
-            }
-          }
-        };
-        
-        streamingRes.write(`data: ${JSON.stringify(stopResponse)}\n\n`);
-        
-        // Close streaming connection
-        streamingRes.end();
-      } catch (error) {
-        console.error('Error stopping streaming:', error);
-      }
-    }
-    
-    isStreamingMode = false;
-    streamingRes = null;
-    
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Stopped polling for new emails and exited streaming mode."
-        }
-      ]
-    };
-  }
-);
-
-mcp.tool(
-  "check_for_new_messages",
-  "Manually check for new messages",
-  {
-    parameters: {},
-  },
-  async () => {
-    try {
-      const messages = await gmailMonitor.checkForNewMessages();
-      if (!messages.length) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Checked for new messages. No new messages found."
-            }
-          ]
-        };
-      }
-      return {
-        content: messages.map(msg => ({
-          type: "text",
-          text: `Subject: ${msg.payload?.headers?.find(h => h.name.toLowerCase() === "subject")?.value || "No subject"}\nFrom: ${msg.payload?.headers?.find(h => h.name.toLowerCase() === "from")?.value || "Unknown"}\nSnippet: ${msg.snippet}`
-        }))
-      };
-    } catch (error) {
-      console.error('Error in check_for_new_messages:', error);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error checking for new messages: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
-
-mcp.tool(
-  "get_gmail_status",
-  "Get the current status of Gmail monitoring",
-  {
-    parameters: {},
-  },
-  async () => {
-    // Placeholder status
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Gmail Status: polling active = ${!!gmailMonitor['pollingInterval']}`
-        }
-      ]
-    };
-  }
-);
-
-mcp.tool(
-  "search_emails",
-  "Search emails in Gmail",
-  {
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "Gmail search query"
-        },
-        maxResults: {
-          type: "number",
-          description: "Maximum number of results (default: 10)",
-          default: 10
-        }
-      },
-      required: ["query"]
-    },
-  },
-  async ({ query, maxResults = 10 }) => {
-    try {
-      // For now, return a placeholder since searchEmails doesn't exist
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Search feature not yet implemented. Query: "${query}", max results: ${maxResults}`
-          }
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error searching emails: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
-
-mcp.tool(
-  "detect_meetings_in_email",
-  "Analyze an email for meeting-related content",
-  {
-    parameters: {
-      type: "object",
-      properties: {
-        messageId: {
-          type: "string",
-          description: "Gmail message ID"
-        }
-      },
-      required: ["messageId"]
-    },
-  },
-  async ({ messageId }) => {
-    try {
-      // For now, return a placeholder since detectMeetingsInEmail doesn't exist
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Meeting detection feature not yet implemented. Message ID: ${messageId}`
-          }
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error detecting meetings: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ]
-      };
-    }
-  }
-);
-
-mcp.tool(
-  "get_sse_status",
-  "Get the current status of SSE connections",
-  {
-    parameters: {},
-  },
-  async () => {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `SSE Status: ${sseManager.getClientCount()} connected clients`
-        }
-      ]
-    };
-  }
-);
-
-// MCP Resources
-
-mcp.resource(
-  "gmail_inbox",
-  "Gmail inbox messages",
-  {
-    mimeType: "application/json",
-    description: "Current Gmail inbox messages"
-  },
-  async () => {
-    try {
-      // For now, return a placeholder since getRecentEmails doesn't exist
-      return {
-        contents: [
-          {
-            uri: "gmail://inbox",
-            mimeType: "application/json",
-            text: JSON.stringify({ message: "Gmail inbox resource not yet implemented" }, null, 2)
-          }
-        ]
-      };
-    } catch (error) {
-      return {
-        contents: [
-          {
-            uri: "gmail://inbox",
-            mimeType: "application/json",
-            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2)
-          }
-        ]
-      };
-    }
-  }
-);
+// Remove all mcp.tool and mcp.resource definitions from this file. Only keep the import and call to setupMcpServer where needed.
 
 // Main function
 async function main() {
@@ -427,9 +181,19 @@ async function main() {
   // Create Express app
   const app = express();
   const port = parseInt(process.env['MCP_SERVER_PORT'] || '3001');
+
+  const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
+
   
-  // Middleware
-  app.use(cors());
+  // Middleware with CORS management for SessionID
+  app.use(cors(
+    {
+      origin: '*', // Configure appropriately for production, for example:
+      // origin: ['https://your-remote-domain.com', 'https://your-other-remote-domain.com'],
+      exposedHeaders: ['Mcp-Session-Id'],
+      allowedHeaders: ['Content-Type', 'mcp-session-id'],
+    }
+  ));
   app.use(express.json());
   
   // Add this endpoint:
@@ -437,7 +201,6 @@ async function main() {
     // Generate a new session token (UUID)
     console.log('🔧 POST /mcp/session received');
     console.log('Headers:', req.headers);
-    console.log('Body:', JSON.stringify(req.body, null, 2));
     const sessionToken = randomUUID();
     console.log('Generated session token:', sessionToken);
     // Optionally: store/track the sessionToken if you want to manage sessions
@@ -445,13 +208,7 @@ async function main() {
   });
 
   // Create MCP transport (persistent)
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => 'cursor-session-fresh-67890', // Use fixed session ID to match client
-  });
 
-  // Connect MCP server to transport
-  await mcp.connect(transport);
-  
   // MCP endpoint with JWT authentication
   app.post('/mcp', jwtAuthMiddleware.authenticateJWT, async (req: AuthenticatedRequest, res) => {
     console.log('🔧 POST /mcp received');
@@ -459,6 +216,56 @@ async function main() {
     console.log('Body:', JSON.stringify(req.body, null, 2));
     console.log(`👤 Authenticated user: ${req.user?.email}`);
     
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    let transport: StreamableHTTPServerTransport;
+    // Check for initialize request
+    if (sessionId && transports[sessionId]) {
+      // Reuse existing transport
+      transport = transports[sessionId];
+    } else if (!sessionId && isInitializeRequest(req.body)) {
+      // New initialization request
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sessionId) => {
+          // Store the transport by session ID
+          transports[sessionId] = transport;
+        },
+        // DNS rebinding protection is disabled by default for backwards compatibility. If you are running this server
+        // locally, make sure to set:
+        // enableDnsRebindingProtection: true,
+        // allowedHosts: ['127.0.0.1'],
+      });
+
+      // Clean up transport when closed
+      transport.onclose = () => {
+        if (transport.sessionId) {
+          delete transports[transport.sessionId];
+        }
+      };
+      const server = new McpServer({
+        name: "example-server",
+        version: "1.0.0"
+      });
+      setupMcpServer(server, gmailMonitor, sseManager);
+
+      // Connect to the MCP server
+      await server.connect(transport);
+    } else {
+      // Invalid request
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: No valid session ID provided',
+        },
+        id: null,
+      });
+      return;
+    }
+
+    // Handle the request
+    await transport.handleRequest(req, res, req.body);
+
     try {
       // Check if this is a start_watching_for_new_emails request
       const isStartWatching = req.body?.method === 'tools/call' && 
@@ -495,7 +302,7 @@ async function main() {
         res.write(`data: ${JSON.stringify(initialResponse)}\n\n`);
         
         // Start the email monitoring
-        gmailMonitor.startPolling(60000);
+        gmailMonitor.startPolling(30000);
         
         // Keep connection alive and send notifications
         const keepAliveInterval = setInterval(() => {
@@ -570,6 +377,12 @@ async function main() {
     console.log(`👤 Authenticated user: ${req.user?.email}`);
     
     try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      if (!sessionId || !transports[sessionId]) {
+        res.status(400).send('Invalid or missing session ID');
+        return;
+      }
+      const transport = transports[sessionId];
       await transport.handleRequest(req, res);
       console.log('✅ GET /mcp handled successfully');
     } catch (error) {
