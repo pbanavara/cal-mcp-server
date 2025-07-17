@@ -17,11 +17,15 @@ A Model Context Protocol (MCP) server that monitors Gmail for new emails and sen
 mcp-server/
 ├── src/
 │   ├── types.ts              # TypeScript type definitions
-│   ├── token-manager.ts      # OAuth token management
+│   ├── token-manager.ts      # JWT token management
 │   ├── gmail-monitor.ts      # Gmail API monitoring
-│   ├── mcp-server.ts         # MCP protocol implementation
-│   ├── server.ts             # Main server entry point
+│   ├── mcp-server-remote.ts  # Remote MCP server with HTTP transport
+│   ├── jwt-auth-middleware.ts # JWT authentication middleware
 │   └── webhook-server.ts     # Gmail webhook handler
+├── scripts/
+│   ├── test-jwt-auth.js      # JWT authentication testing
+│   ├── test-remote-mcp-client.js # Remote MCP client testing
+│   └── test-token-refresh.js # Token refresh testing
 ├── dist/                     # Compiled JavaScript
 ├── package.json              # Dependencies and scripts
 ├── tsconfig.json            # TypeScript configuration
@@ -92,10 +96,10 @@ The Gmail watch API requires a Google Cloud Pub/Sub topic and subscription:
 
 ### Starting the MCP Server
 
-1. **Ensure you have tokens** from the web app:
+1. **Ensure you have JWT tokens** from the web app:
    ```bash
-   # Check if tokens exist
-   ls ../mcp_tokens.json
+   # Check if JWT tokens exist
+   ls ../mcp-webapp/tokens/jwt_tokens.json
    ```
 
 2. **Start the MCP server**:
@@ -121,7 +125,7 @@ npm run webhook
 ```bash
 npm run build        # Build TypeScript to JavaScript
 npm run start        # Start the MCP server
-npm run dev          # Start in development mode
+npm run dev          # Start in development mode (mcp-server-remote.ts)
 npm run watch        # Watch for changes and rebuild
 npm run clean        # Clean build artifacts
 npm run webhook      # Start webhook server
@@ -168,9 +172,10 @@ The server implements the MCP protocol with the following capabilities:
 
 ## 🔐 Authentication
 
-The server reads OAuth tokens from the web app's storage:
+The server uses JWT authentication and reads Google OAuth tokens from the web app's storage:
 
-- **Token Location**: `../mcp_tokens.json` (relative to web app)
+- **JWT Token**: Required for MCP server authentication
+- **Google Token Location**: `../mcp-webapp/tokens/jwt_tokens.json`
 - **Token Format**: Google OAuth 2.0 tokens with refresh capability
 - **Auto-refresh**: Handled by the Google APIs library
 
@@ -180,7 +185,7 @@ The server reads OAuth tokens from the web app's storage:
 
 1. **"No tokens available"**
    - Ensure you've authenticated in the web app first
-   - Check that `mcp_tokens.json` exists in the parent directory
+   - Check that `jwt_tokens.json` exists in the web app tokens directory
 
 2. **"Token is expired"**
    - Re-authenticate in the web app

@@ -1,14 +1,33 @@
 import fs from 'fs';
 import { TokenData } from './types';
 
+interface JWTTokenRecord {
+  jti: string;
+  user_id: string;
+  email: string;
+  name: string;
+  google_tokens: {
+    access_token: string;
+    refresh_token: string;
+    expiry_date: number;
+    scopes: string[];
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+interface JWTTokenFile {
+  [jti: string]: JWTTokenRecord;
+}
+
 export class TokenManager {
   private static instance: TokenManager;
   private tokens: Map<string, TokenData> = new Map();
   private tokenFilePath: string;
 
   private constructor() {
-    // Path to the web app's token storage (updated for new structure)
-    this.tokenFilePath = '/Users/pbanavara/dev/mcp_email_agent/mcp-webapp/tokens/mcp_tokens.json';
+    // Path to the web app's JWT token storage
+    this.tokenFilePath = '/Users/pbanavara/dev/mcp_email_agent/mcp-webapp/tokens/jwt_tokens.json';
     console.error(`Token file: ${this.tokenFilePath}`);
     this.loadTokens();
   }
@@ -24,21 +43,25 @@ export class TokenManager {
     try {
       if (fs.existsSync(this.tokenFilePath)) {
         const data = fs.readFileSync(this.tokenFilePath, 'utf8');
-        const tokenData = JSON.parse(data);
+        const jwtTokenData: JWTTokenFile = JSON.parse(data);
         
-        // Support both map-of-emails and flat token formats
-        if (typeof tokenData === 'object' && !Array.isArray(tokenData)) {
-          if ('access_token' in tokenData || 'token' in tokenData) {
-            // Flat Google token format
-            this.tokens.set('default', tokenData as TokenData);
-          } else {
-            // Map of emails format
-            Object.entries(tokenData).forEach(([email, token]) => {
-              this.tokens.set(email, token as TokenData);
-            });
-          }
-        }
-        console.error(`Loaded ${this.tokens.size} token(s) from web app storage`);
+        // Convert JWT token format to TokenData format
+        Object.values(jwtTokenData).forEach((jwtRecord) => {
+          const tokenData: TokenData = {
+            access_token: jwtRecord.google_tokens.access_token,
+            refresh_token: jwtRecord.google_tokens.refresh_token,
+            expiry_date: jwtRecord.google_tokens.expiry_date,
+            scopes: jwtRecord.google_tokens.scopes,
+            user_email: jwtRecord.email,
+            client_id: process.env['GOOGLE_CLIENT_ID'] || '',
+            client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
+            token_uri: 'https://oauth2.googleapis.com/token'
+          };
+          
+          this.tokens.set(jwtRecord.email, tokenData);
+        });
+        
+        console.error(`Loaded ${this.tokens.size} token(s) from JWT storage`);
       } else {
         console.error(`Token file not found at: ${this.tokenFilePath}`);
       }
@@ -55,12 +78,12 @@ export class TokenManager {
     return this.tokens.values().next().value;
   }
 
-  public getAllTokens(): TokenData[] {
-    return Array.from(this.tokens.values());
-  }
-
   public hasTokens(): boolean {
     return this.tokens.size > 0;
+  }
+
+  public getTokenCount(): number {
+    return this.tokens.size;
   }
 
   public isTokenExpired(token: TokenData): boolean {
@@ -73,10 +96,6 @@ export class TokenManager {
 
   public getTokenFile(): string {
     return this.tokenFilePath;
-  }
-
-  public getTokenCount(): number {
-    return this.tokens.size;
   }
 }
 

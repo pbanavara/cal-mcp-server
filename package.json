@@ -2,20 +2,19 @@
   "name": "mcp-email-server",
   "version": "1.0.0",
   "description": "MCP server for Gmail email monitoring and meeting detection",
-  "main": "dist/server.js",
+  "main": "dist/mcp-server-remote.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts",
-    "remote": "ts-node src/mcp-server-remote.ts",
+    "start": "node dist/mcp-server-remote.js",
+    "dev": "ts-node src/mcp-server-remote.ts",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
-    "webhook": "ts-node src/webhook-server.ts",
-    "configure": "node scripts/configure-pubsub.js"
+    "webhook": "ts-node src/webhook-server.ts"
   },
   "dependencies": {
     "@google-cloud/pubsub": "^5.1.0",
     "@modelcontextprotocol/sdk": "^1.15.0",
+    "axios": "^1.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.18.2",

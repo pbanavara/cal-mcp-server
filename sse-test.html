@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email SSE Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .notification {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            animation: slideIn 0.3s ease-out;
+        }
+        .notification h3 {
+            margin: 0 0 10px 0;
+            color: #856404;
+        }
+        .notification p {
+            margin: 5px 0;
+            color: #666;
+        }
+        .notification .snippet {
+            font-style: italic;
+            background-color: #f8f9fa;
+            padding: 8px;
+            border-radius: 3px;
+            margin-top: 10px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📧 Email SSE Test</h1>
+        <p>This page demonstrates real-time email notifications using Server-Sent Events (SSE).</p>
+        
+        <div class="controls">
+            <button id="connectBtn" onclick="connectSSE()">Connect to SSE</button>
+            <button id="disconnectBtn" onclick="disconnectSSE()" disabled>Disconnect</button>
+            <button onclick="clearNotifications()">Clear Notifications</button>
+            <span id="clientId"></span>
+        </div>
+
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div id="notifications"></div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let clientId = null;
+
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource('http://localhost:3001/sse');
+            
+            eventSource.onopen = function(event) {
+                updateStatus('Connected', 'connected');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+            };
+
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.event === 'connected') {
+                    clientId = data.clientId;
+                    document.getElementById('clientId').textContent = `Client ID: ${clientId}`;
+                } else if (data.event === 'new_email') {
+                    addNotification(data.data);
+                }
+            };
+
+            eventSource.onerror = function(event) {
+                updateStatus('Connection Error', 'disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+            };
+        }
+
+        function disconnectSSE() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            updateStatus('Disconnected', 'disconnected');
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            document.getElementById('clientId').textContent = '';
+        }
+
+        function updateStatus(message, className) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${className}`;
+        }
+
+        function addNotification(emailData) {
+            const notificationsEl = document.getElementById('notifications');
+            const notificationEl = document.createElement('div');
+            notificationEl.className = 'notification';
+            
+            notificationEl.innerHTML = `
+                <h3>📧 New Email: ${emailData.subject}</h3>
+                <p><strong>From:</strong> ${emailData.from}</p>
+                <p><strong>Received:</strong> ${new Date(emailData.receivedAt).toLocaleString()}</p>
+                <p><strong>Message ID:</strong> ${emailData.messageId}</p>
+                <div class="snippet">${emailData.snippet}</div>
+            `;
+            
+            notificationsEl.insertBefore(notificationEl, notificationsEl.firstChild);
+        }
+
+        function clearNotifications() {
+            document.getElementById('notifications').innerHTML = '';
+        }
+
+        // Auto-connect on page load
+        window.onload = function() {
+            setTimeout(connectSSE, 1000);
+        };
+    </script>
+</body>
+</html> 

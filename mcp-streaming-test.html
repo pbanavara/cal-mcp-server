@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Streaming Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .streaming { background-color: #cce5ff; color: #004085; }
+        .notification {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            animation: slideIn 0.3s ease-out;
+        }
+        .email-notification {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📧 MCP Streaming Test</h1>
+        <p>This page demonstrates the MCP streaming behavior when using <code>start_watching_for_new_emails</code>.</p>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startWatching()">Start Watching Emails</button>
+            <button id="stopBtn" onclick="stopWatching()" disabled>Stop Watching</button>
+            <button onclick="clearLog()">Clear Log</button>
+            <button onclick="testTool()">Test Regular Tool</button>
+        </div>
+
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div id="notifications"></div>
+        
+        <h3>Event Log</h3>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let isStreaming = false;
+        let eventSource = null;
+
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `<span style="color: #666;">[${timestamp}]</span> <span style="color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#007bff'}">${message}</span>`;
+            logEl.appendChild(logEntry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateStatus(message, className) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${className}`;
+        }
+
+        function addNotification(title, message, type = 'info') {
+            const notificationsEl = document.getElementById('notifications');
+            const notificationEl = document.createElement('div');
+            notificationEl.className = `notification ${type === 'email' ? 'email-notification' : ''}`;
+            
+            notificationEl.innerHTML = `
+                <h3>${title}</h3>
+                <p>${message}</p>
+            `;
+            
+            notificationsEl.insertBefore(notificationEl, notificationsEl.firstChild);
+        }
+
+        async function startWatching() {
+            log('Starting email watching...', 'info');
+            
+            try {
+                const response = await fetch('http://localhost:3001/mcp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer YOUR_JWT_TOKEN' // Replace with actual token
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        method: 'tools/call',
+                        params: {
+                            name: 'start_watching_for_new_emails',
+                            arguments: {}
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    // Switch to streaming mode
+                    isStreaming = true;
+                    updateStatus('Streaming Mode Active', 'streaming');
+                    
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
+                    
+                    log('Switched to streaming mode', 'success');
+                    addNotification('Streaming Started', 'Email monitoring is now active. You will receive real-time notifications.');
+                    
+                    // Set up event source for streaming
+                    setupStreaming(response);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                log(`Error starting watching: ${error.message}`, 'error');
+                addNotification('Error', `Failed to start email watching: ${error.message}`);
+            }
+        }
+
+        function setupStreaming(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            
+            function readStream() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        log('Stream ended', 'info');
+                        return;
+                    }
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    lines.forEach(line => {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                handleStreamData(data);
+                            } catch (error) {
+                                log(`Error parsing stream data: ${error.message}`, 'error');
+                            }
+                        }
+                    });
+                    
+                    readStream();
+                }).catch(error => {
+                    log(`Stream error: ${error.message}`, 'error');
+                });
+            }
+            
+            readStream();
+        }
+
+        function handleStreamData(data) {
+            log(`Received: ${JSON.stringify(data)}`, 'info');
+            
+            if (data.method === 'notifications/notify') {
+                const notification = data.params.notification;
+                
+                if (notification.type === 'new_email') {
+                    const emailData = notification.data;
+                    addNotification(
+                        `📧 New Email: ${emailData.subject}`,
+                        `From: ${emailData.from}<br>Received: ${new Date(emailData.receivedAt).toLocaleString()}<br>Snippet: ${emailData.snippet}`,
+                        'email'
+                    );
+                    log(`New email received: ${emailData.subject}`, 'success');
+                } else if (notification.type === 'email_monitoring_active') {
+                    log(notification.message, 'info');
+                } else if (notification.type === 'email_monitoring_stopped') {
+                    log(notification.message, 'info');
+                    stopStreaming();
+                }
+            } else if (data.result) {
+                log(`Tool result: ${JSON.stringify(data.result)}`, 'success');
+            }
+        }
+
+        async function stopWatching() {
+            log('Stopping email watching...', 'info');
+            
+            try {
+                const response = await fetch('http://localhost:3001/mcp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer YOUR_JWT_TOKEN' // Replace with actual token
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 2,
+                        method: 'tools/call',
+                        params: {
+                            name: 'stop_watching_for_new_emails',
+                            arguments: {}
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    log('Email watching stopped', 'success');
+                    addNotification('Monitoring Stopped', 'Email monitoring has been stopped.');
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                log(`Error stopping watching: ${error.message}`, 'error');
+            }
+        }
+
+        function stopStreaming() {
+            isStreaming = false;
+            updateStatus('Disconnected', 'disconnected');
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+        }
+
+        async function testTool() {
+            log('Testing regular tool call...', 'info');
+            
+            try {
+                const response = await fetch('http://localhost:3001/mcp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer YOUR_JWT_TOKEN' // Replace with actual token
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 3,
+                        method: 'tools/call',
+                        params: {
+                            name: 'get_sse_status',
+                            arguments: {}
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`Regular tool response: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                log(`Error testing tool: ${error.message}`, 'error');
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        // Auto-start on page load
+        window.onload = function() {
+            log('Page loaded. Ready to test MCP streaming.', 'info');
+        };
+    </script>
+</body>
+</html> 

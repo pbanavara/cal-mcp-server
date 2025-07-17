@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Client Usage Example</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .notification {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .code-block {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📧 SSE Client Usage Example</h1>
+        <p>This example shows how to use the EmailSSEClient library in your applications.</p>
+        
+        <div class="code-block">
+// Include the SSE client library
+&lt;script src="sse-client.js"&gt;&lt;/script&gt;
+
+// Create and configure the client
+const emailClient = new EmailSSEClient('http://localhost:3001');
+
+// Listen for new emails
+emailClient.on('new_email', (emailData) => {
+    console.log('New email received:', emailData);
+    // Handle the new email notification
+});
+
+// Listen for connection events
+emailClient.on('connected', () => {
+    console.log('Connected to email notifications');
+});
+
+emailClient.on('disconnected', () => {
+    console.log('Disconnected from email notifications');
+});
+
+// Connect to the server
+emailClient.connect();
+        </div>
+
+        <div class="controls">
+            <button onclick="startClient()">Start Client</button>
+            <button onclick="stopClient()">Stop Client</button>
+            <button onclick="checkStatus()">Check Status</button>
+        </div>
+
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div id="notifications"></div>
+    </div>
+
+    <script src="sse-client.js"></script>
+    <script>
+        let emailClient = null;
+
+        function startClient() {
+            if (emailClient) {
+                emailClient.disconnect();
+            }
+
+            emailClient = new EmailSSEClient('http://localhost:3001');
+
+            // Listen for new emails
+            emailClient.on('new_email', (emailData) => {
+                console.log('📧 New email:', emailData);
+                addNotification(emailData);
+            });
+
+            // Listen for connection events
+            emailClient.on('connected', (data) => {
+                updateStatus('Connected', 'connected');
+                console.log('📡 Connected to email notifications');
+            });
+
+            emailClient.on('disconnected', () => {
+                updateStatus('Disconnected', 'disconnected');
+                console.log('📡 Disconnected from email notifications');
+            });
+
+            emailClient.on('error', (error) => {
+                updateStatus('Error: ' + error.message, 'disconnected');
+                console.error('📡 SSE Error:', error);
+            });
+
+            // Connect to the server
+            emailClient.connect();
+        }
+
+        function stopClient() {
+            if (emailClient) {
+                emailClient.disconnect();
+                emailClient = null;
+            }
+            updateStatus('Disconnected', 'disconnected');
+        }
+
+        async function checkStatus() {
+            if (emailClient) {
+                const status = emailClient.getStatus();
+                const serverStatus = await emailClient.checkServerStatus();
+                
+                console.log('Client Status:', status);
+                console.log('Server Status:', serverStatus);
+                
+                alert(`Client Status: ${JSON.stringify(status, null, 2)}\n\nServer Status: ${JSON.stringify(serverStatus, null, 2)}`);
+            } else {
+                alert('No client running');
+            }
+        }
+
+        function updateStatus(message, className) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${className}`;
+        }
+
+        function addNotification(emailData) {
+            const notificationsEl = document.getElementById('notifications');
+            const notificationEl = document.createElement('div');
+            notificationEl.className = 'notification';
+            
+            notificationEl.innerHTML = `
+                <h3>📧 New Email: ${emailData.subject}</h3>
+                <p><strong>From:</strong> ${emailData.from}</p>
+                <p><strong>Received:</strong> ${new Date(emailData.receivedAt).toLocaleString()}</p>
+                <p><strong>Message ID:</strong> ${emailData.messageId}</p>
+                <div style="font-style: italic; background-color: #f8f9fa; padding: 8px; border-radius: 3px; margin-top: 10px;">
+                    ${emailData.snippet}
+                </div>
+            `;
+            
+            notificationsEl.insertBefore(notificationEl, notificationsEl.firstChild);
+        }
+
+        // Auto-start on page load
+        window.onload = function() {
+            setTimeout(startClient, 1000);
+        };
+    </script>
+</body>
+</html> 
