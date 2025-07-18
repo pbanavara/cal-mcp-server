@@ -1,35 +1,15 @@
-import fs from 'fs';
 import { TokenData } from './types';
-
-interface JWTTokenRecord {
-  jti: string;
-  user_id: string;
-  email: string;
-  name: string;
-  google_tokens: {
-    access_token: string;
-    refresh_token: string;
-    expiry_date: number;
-    scopes: string[];
-  };
-  created_at: string;
-  updated_at: string;
-}
-
-interface JWTTokenFile {
-  [jti: string]: JWTTokenRecord;
-}
+import { FirestoreTokenStorage } from './firestore-token-storage';
 
 export class TokenManager {
   private static instance: TokenManager;
   private tokens: Map<string, TokenData> = new Map();
-  private tokenFilePath: string;
+  private firestoreStorage: FirestoreTokenStorage;
+  private isInitialized: boolean = false;
 
   private constructor() {
-    // Path to the web app's JWT token storage
-    this.tokenFilePath = '/Users/pbanavara/dev/mcp_email_agent/mcp-webapp/tokens/jwt_tokens.json';
-    console.error(`Token file: ${this.tokenFilePath}`);
-    this.loadTokens();
+    this.firestoreStorage = new FirestoreTokenStorage();
+    console.log('🔧 TokenManager constructor called');
   }
 
   public static getInstance(): TokenManager {
@@ -39,38 +19,43 @@ export class TokenManager {
     return TokenManager.instance;
   }
 
-  private loadTokens(): void {
+  private async loadTokensFromFirestore(): Promise<void> {
     try {
-      if (fs.existsSync(this.tokenFilePath)) {
-        const data = fs.readFileSync(this.tokenFilePath, 'utf8');
-        const jwtTokenData: JWTTokenFile = JSON.parse(data);
+      console.log('🔧 Loading tokens from Firestore...');
+      const allTokens = await this.firestoreStorage.getAllTokens();
+      
+      // Clear existing tokens
+      this.tokens.clear();
+      
+      // Convert Firestore format to TokenData format
+      allTokens.forEach((tokenRecord) => {
+        const tokenData: TokenData = {
+          access_token: tokenRecord.google_tokens.access_token,
+          refresh_token: tokenRecord.google_tokens.refresh_token,
+          expiry_date: tokenRecord.google_tokens.expiry_date,
+          scopes: tokenRecord.google_tokens.scopes,
+          user_email: tokenRecord.email,
+          client_id: process.env['GOOGLE_CLIENT_ID'] || '',
+          client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
+          token_uri: 'https://oauth2.googleapis.com/token'
+        };
         
-        // Convert JWT token format to TokenData format
-        Object.values(jwtTokenData).forEach((jwtRecord) => {
-          const tokenData: TokenData = {
-            access_token: jwtRecord.google_tokens.access_token,
-            refresh_token: jwtRecord.google_tokens.refresh_token,
-            expiry_date: jwtRecord.google_tokens.expiry_date,
-            scopes: jwtRecord.google_tokens.scopes,
-            user_email: jwtRecord.email,
-            client_id: process.env['GOOGLE_CLIENT_ID'] || '',
-            client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
-            token_uri: 'https://oauth2.googleapis.com/token'
-          };
-          
-          this.tokens.set(jwtRecord.email, tokenData);
-        });
-        
-        console.error(`Loaded ${this.tokens.size} token(s) from JWT storage`);
-      } else {
-        console.error(`Token file not found at: ${this.tokenFilePath}`);
-      }
+        this.tokens.set(tokenRecord.email, tokenData);
+      });
+      
+      console.log(`✅ Loaded ${this.tokens.size} token(s) from Firestore`);
+      this.isInitialized = true;
     } catch (error) {
-      console.error('Error loading tokens:', error);
+      console.error('❌ Error loading tokens from Firestore:', error);
+      this.isInitialized = false;
     }
   }
 
-  public getToken(email?: string): TokenData | undefined {
+  public async getToken(email?: string): Promise<TokenData | undefined> {
+    if (!this.isInitialized) {
+      await this.loadTokensFromFirestore();
+    }
+    
     if (email) {
       return this.tokens.get(email);
     }
@@ -78,11 +63,17 @@ export class TokenManager {
     return this.tokens.values().next().value;
   }
 
-  public hasTokens(): boolean {
+  public async hasTokens(): Promise<boolean> {
+    if (!this.isInitialized) {
+      await this.loadTokensFromFirestore();
+    }
     return this.tokens.size > 0;
   }
 
-  public getTokenCount(): number {
+  public async getTokenCount(): Promise<number> {
+    if (!this.isInitialized) {
+      await this.loadTokensFromFirestore();
+    }
     return this.tokens.size;
   }
 
@@ -90,12 +81,36 @@ export class TokenManager {
     return Date.now() >= token.expiry_date;
   }
 
-  public refreshTokens(): void {
-    this.loadTokens();
+  public async refreshTokens(): Promise<void> {
+    await this.loadTokensFromFirestore();
   }
 
-  public getTokenFile(): string {
-    return this.tokenFilePath;
+  public async getTokenByJTI(jti: string): Promise<TokenData | undefined> {
+    try {
+      const tokenRecord = await this.firestoreStorage.getTokens(jti);
+      if (tokenRecord) {
+        return {
+          access_token: tokenRecord.google_tokens.access_token,
+          refresh_token: tokenRecord.google_tokens.refresh_token,
+          expiry_date: tokenRecord.google_tokens.expiry_date,
+          scopes: tokenRecord.google_tokens.scopes,
+          user_email: tokenRecord.email,
+          client_id: process.env['GOOGLE_CLIENT_ID'] || '',
+          client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
+          token_uri: 'https://oauth2.googleapis.com/token'
+        };
+      }
+      return undefined;
+    } catch (error) {
+      console.error('❌ Error getting token by JTI:', error);
+      return undefined;
+    }
+  }
+
+  public async cleanupExpiredTokens(): Promise<void> {
+    await this.firestoreStorage.cleanupExpiredTokens();
+    // Reload tokens after cleanup
+    await this.refreshTokens();
   }
 }
 

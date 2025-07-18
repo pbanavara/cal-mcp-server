@@ -162,14 +162,15 @@ async function main() {
   console.log('Starting Remote MCP Email Monitor Server...');
   
   // Check if tokens are available
-  if (!tokenManager.hasTokens()) {
-    console.error('No authentication tokens found.');
+  const hasTokens = await tokenManager.hasTokens();
+  if (!hasTokens) {
+    console.error('No authentication tokens found in Firestore.');
     console.error('Please authenticate in the web app first: http://localhost:8080');
     process.exit(1);
   }
 
-  console.log(`Found ${tokenManager.getTokenCount()} token(s)`);
-  console.log(`Token file: ${tokenManager.getTokenFile()}`);
+  const tokenCount = await tokenManager.getTokenCount();
+  console.log(`Found ${tokenCount} token(s) in Firestore`);
 
   // Initialize Gmail monitor
   const gmailInitialized = await initializeGmailMonitor();

@@ -14,7 +14,7 @@ export class GmailMonitor {
   }
 
   public async initialize(): Promise<boolean> {
-    const token = tokenManager.getToken();
+    const token = await tokenManager.getToken();
     if (!token) {
       console.error('No tokens available for Gmail monitoring');
       return false;
@@ -33,8 +33,8 @@ export class GmailMonitor {
     oauth2Client.setCredentials({
       access_token: token.access_token,
       refresh_token: token.refresh_token,
-      scope: token.scopes?.join(' ') || token.scope || 'https://www.googleapis.com/auth/gmail.readonly',
-      token_type: token.token_type || null,
+      scope: token.scopes?.join(' ') || 'https://www.googleapis.com/auth/gmail.readonly',
+      token_type: 'Bearer',
       expiry_date: token.expiry_date,
     });
 

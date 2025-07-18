@@ -12,7 +12,7 @@ export class TokenStorageService {
   async getTokens(_jti: string): Promise<TokenRecord | null> {
     try {
       // Use the existing token manager to get the first available token
-      const tokenData = tokenManager.getToken();
+      const tokenData = await tokenManager.getToken();
       if (tokenData) {
         return {
           google_tokens: tokenData,
