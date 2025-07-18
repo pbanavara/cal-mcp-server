@@ -505,17 +505,16 @@ app.get('/', (_req: express.Request, res: express.Response) => {
     `);
 });
 
-// Only start the server in development mode
-if (process.env['NODE_ENV'] === 'development') {
-  app.listen(port, () => {
-    console.log(`🚀 Remote MCP Email Server running on http://localhost:${port}`);
-    console.log(`🔧 MCP endpoint: http://localhost:${port}/mcp`);
-    console.log(`💚 Health check: http://localhost:${port}/health`);
-    console.log(`📡 SSE endpoint: http://localhost:${port}/sse`);
-    console.log('✅ Ready for client connections via HTTP');
-    console.log('ℹ️  Note: Gmail monitoring will be available once users authenticate');
-  });
-}
+// Start the server for both development and production
+const serverPort = process.env['PORT'] || port;
+app.listen(serverPort, () => {
+  console.log(`🚀 Remote MCP Email Server running on port ${serverPort}`);
+  console.log(`🔧 MCP endpoint: http://localhost:${serverPort}/mcp`);
+  console.log(`💚 Health check: http://localhost:${serverPort}/health`);
+  console.log(`📡 SSE endpoint: http://localhost:${serverPort}/sse`);
+  console.log('✅ Ready for client connections via HTTP');
+  console.log('ℹ️  Note: Gmail monitoring will be available once users authenticate');
+});
 
 // Export the app for Vercel (production)
 export default app;
