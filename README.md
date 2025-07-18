@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server that monitors Gmail for new emails and sen
 
 ## 🚀 Features
 
-- **Gmail API Integration**: Monitors Gmail inbox for new messages
+- **Gmail API Integrations**: Monitors Gmail inbox for new messages
 - **MCP Protocol**: Implements the Model Context Protocol for client communication
 - **Real-time Notifications**: Sends instant notifications when new emails arrive
 - **Token Management**: Reads OAuth tokens from the web app
