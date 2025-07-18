@@ -1,14 +1,14 @@
 import { TokenData } from './types';
-import { FirestoreTokenStorage } from './firestore-token-storage';
+import { DynamoDBTokenStorage } from './dynamodb-token-storage';
 
 export class TokenManager {
   private static instance: TokenManager;
   private tokens: Map<string, TokenData> = new Map();
-  private firestoreStorage: FirestoreTokenStorage;
+  private dynamoDBStorage: DynamoDBTokenStorage;
   private isInitialized: boolean = false;
 
   private constructor() {
-    this.firestoreStorage = new FirestoreTokenStorage();
+    this.dynamoDBStorage = new DynamoDBTokenStorage();
     console.log('🔧 TokenManager constructor called');
   }
 
@@ -19,21 +19,21 @@ export class TokenManager {
     return TokenManager.instance;
   }
 
-  private async loadTokensFromFirestore(): Promise<void> {
+  private async loadTokensFromDynamoDB(): Promise<void> {
     try {
-      console.log('🔧 Loading tokens from Firestore...');
-      const allTokens = await this.firestoreStorage.getAllTokens();
+      console.log('🔧 Loading tokens from DynamoDB...');
+      const allTokens = await this.dynamoDBStorage.getAllTokens();
       
       // Clear existing tokens
       this.tokens.clear();
       
-      // Convert Firestore format to TokenData format
+      // Convert DynamoDB format to TokenData format
       allTokens.forEach((tokenRecord) => {
         const tokenData: TokenData = {
           access_token: tokenRecord.google_tokens.access_token,
           refresh_token: tokenRecord.google_tokens.refresh_token,
           expiry_date: tokenRecord.google_tokens.expiry_date,
-          scopes: tokenRecord.google_tokens.scopes,
+          scopes: tokenRecord.google_tokens.scopes || [],
           user_email: tokenRecord.email,
           client_id: process.env['GOOGLE_CLIENT_ID'] || '',
           client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
@@ -43,17 +43,17 @@ export class TokenManager {
         this.tokens.set(tokenRecord.email, tokenData);
       });
       
-      console.log(`✅ Loaded ${this.tokens.size} token(s) from Firestore`);
+      console.log(`✅ Loaded ${this.tokens.size} token(s) from DynamoDB`);
       this.isInitialized = true;
     } catch (error) {
-      console.error('❌ Error loading tokens from Firestore:', error);
+      console.error('❌ Error loading tokens from DynamoDB:', error);
       this.isInitialized = false;
     }
   }
 
   public async getToken(email?: string): Promise<TokenData | undefined> {
     if (!this.isInitialized) {
-      await this.loadTokensFromFirestore();
+      await this.loadTokensFromDynamoDB();
     }
     
     if (email) {
@@ -65,14 +65,14 @@ export class TokenManager {
 
   public async hasTokens(): Promise<boolean> {
     if (!this.isInitialized) {
-      await this.loadTokensFromFirestore();
+      await this.loadTokensFromDynamoDB();
     }
     return this.tokens.size > 0;
   }
 
   public async getTokenCount(): Promise<number> {
     if (!this.isInitialized) {
-      await this.loadTokensFromFirestore();
+      await this.loadTokensFromDynamoDB();
     }
     return this.tokens.size;
   }
@@ -82,18 +82,18 @@ export class TokenManager {
   }
 
   public async refreshTokens(): Promise<void> {
-    await this.loadTokensFromFirestore();
+    await this.loadTokensFromDynamoDB();
   }
 
   public async getTokenByJTI(jti: string): Promise<TokenData | undefined> {
     try {
-      const tokenRecord = await this.firestoreStorage.getTokens(jti);
+      const tokenRecord = await this.dynamoDBStorage.getTokens(jti);
       if (tokenRecord) {
         return {
           access_token: tokenRecord.google_tokens.access_token,
           refresh_token: tokenRecord.google_tokens.refresh_token,
           expiry_date: tokenRecord.google_tokens.expiry_date,
-          scopes: tokenRecord.google_tokens.scopes,
+          scopes: tokenRecord.google_tokens.scopes || [],
           user_email: tokenRecord.email,
           client_id: process.env['GOOGLE_CLIENT_ID'] || '',
           client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
@@ -108,7 +108,7 @@ export class TokenManager {
   }
 
   public async cleanupExpiredTokens(): Promise<void> {
-    await this.firestoreStorage.cleanupExpiredTokens();
+    await this.dynamoDBStorage.cleanupExpiredTokens();
     // Reload tokens after cleanup
     await this.refreshTokens();
   }

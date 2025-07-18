@@ -1,4 +1,4 @@
-import { tokenManager } from './token-manager';
+import { DynamoDBTokenStorage, TokenStorageRecord } from './dynamodb-token-storage';
 import { TokenData } from './types';
 
 export interface TokenRecord {
@@ -9,22 +9,79 @@ export interface TokenRecord {
 }
 
 export class TokenStorageService {
-  async getTokens(_jti: string): Promise<TokenRecord | null> {
+  private dynamoDBStorage: DynamoDBTokenStorage;
+
+  constructor() {
+    this.dynamoDBStorage = new DynamoDBTokenStorage();
+  }
+
+  async getTokens(jti: string): Promise<TokenRecord | null> {
     try {
-      // Use the existing token manager to get the first available token
-      const tokenData = await tokenManager.getToken();
-      if (tokenData) {
+      const tokenRecord = await this.dynamoDBStorage.getTokens(jti);
+      if (tokenRecord) {
         return {
-          google_tokens: tokenData,
-          user_email: tokenData.user_email || 'unknown',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          google_tokens: {
+            access_token: tokenRecord.google_tokens.access_token,
+            refresh_token: tokenRecord.google_tokens.refresh_token,
+            expiry_date: tokenRecord.google_tokens.expiry_date,
+            scopes: tokenRecord.google_tokens.scopes || []
+          },
+          user_email: tokenRecord.email,
+          created_at: tokenRecord.created_at,
+          updated_at: tokenRecord.updated_at
         };
       }
       return null;
     } catch (error) {
-      console.error('Error getting tokens:', error);
+      console.error('Error getting tokens from DynamoDB:', error);
       return null;
+    }
+  }
+
+  async putTokens(jti: string, tokenRecord: TokenRecord): Promise<void> {
+    try {
+      const dynamoRecord: TokenStorageRecord = {
+        jti,
+        user_id: tokenRecord.user_email, // Using email as user_id for simplicity
+        email: tokenRecord.user_email,
+        google_tokens: {
+          access_token: tokenRecord.google_tokens.access_token,
+          refresh_token: tokenRecord.google_tokens.refresh_token,
+          expiry_date: tokenRecord.google_tokens.expiry_date,
+          scopes: tokenRecord.google_tokens.scopes || []
+        },
+        created_at: tokenRecord.created_at,
+        updated_at: tokenRecord.updated_at
+      };
+
+      await this.dynamoDBStorage.putTokens(dynamoRecord);
+    } catch (error) {
+      console.error('Error storing tokens in DynamoDB:', error);
+      throw error;
+    }
+  }
+
+  async getAllTokens(): Promise<TokenRecord[]> {
+    try {
+      const dynamoRecords = await this.dynamoDBStorage.getAllTokens();
+      return dynamoRecords.map(record => ({
+        google_tokens: {
+          access_token: record.google_tokens.access_token,
+          refresh_token: record.google_tokens.refresh_token,
+          expiry_date: record.google_tokens.expiry_date,
+          scopes: record.google_tokens.scopes || [],
+          user_email: record.email,
+          client_id: process.env['GOOGLE_CLIENT_ID'] || '',
+          client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
+          token_uri: 'https://oauth2.googleapis.com/token'
+        },
+        user_email: record.email,
+        created_at: record.created_at,
+        updated_at: record.updated_at
+      }));
+    } catch (error) {
+      console.error('Error getting all tokens from DynamoDB:', error);
+      return [];
     }
   }
 }

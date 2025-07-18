@@ -12,6 +12,8 @@
     "webhook": "ts-node src/webhook-server.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.848.0",
+    "@aws-sdk/lib-dynamodb": "^3.848.0",
     "@google-cloud/pubsub": "^5.1.0",
     "@modelcontextprotocol/sdk": "^1.15.0",
     "axios": "^1.10.0",
