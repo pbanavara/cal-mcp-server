@@ -506,12 +506,12 @@ app.get('/', (_req: express.Request, res: express.Response) => {
 });
 
 // Start the server for both development and production
-const serverPort = process.env['PORT'] || port;
-app.listen(serverPort, () => {
+const serverPort = parseInt(process.env['PORT'] || port.toString());
+app.listen(serverPort, '0.0.0.0', () => {
   console.log(`🚀 Remote MCP Email Server running on port ${serverPort}`);
-  console.log(`🔧 MCP endpoint: http://localhost:${serverPort}/mcp`);
-  console.log(`💚 Health check: http://localhost:${serverPort}/health`);
-  console.log(`📡 SSE endpoint: http://localhost:${serverPort}/sse`);
+  console.log(`🔧 MCP endpoint: http://0.0.0.0:${serverPort}/mcp`);
+  console.log(`💚 Health check: http://0.0.0.0:${serverPort}/health`);
+  console.log(`📡 SSE endpoint: http://0.0.0.0:${serverPort}/sse`);
   console.log('✅ Ready for client connections via HTTP');
   console.log('ℹ️  Note: Gmail monitoring will be available once users authenticate');
 });
