@@ -176,6 +176,10 @@ async function topLevelInit() {
     const tokenCount = await tokenManager.getTokenCount();
     console.log(`✅ Found ${tokenCount} token(s) in DynamoDB`);
     
+    // Set up automatic token refresh
+    await tokenManager.setupAutomaticRefresh();
+    console.log('⏰ Automatic token refresh enabled');
+    
     // Initialize Gmail monitor only if tokens are available
     const gmailInitialized = await initializeGmailMonitor();
     if (!gmailInitialized) {

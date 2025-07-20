@@ -170,6 +170,58 @@ export class DynamoDBTokenStorage {
     }
   }
 
+  async updateTokens(record: TokenStorageRecord): Promise<void> {
+    console.log('🔧 updateTokens() called');
+    console.log(`🔧 Updating tokens for JTI: ${record.jti}`);
+    
+    await this.initialize();
+    
+    try {
+      await this.client.send(new PutCommand({
+        TableName: this.tableName,
+        Item: record
+      }));
+      
+      console.log('✅ Tokens updated successfully in DynamoDB');
+    } catch (error) {
+      console.error('❌ Error updating tokens in DynamoDB:', error);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      throw error;
+    }
+  }
+
+  async deleteTokens(email: string): Promise<void> {
+    console.log('🔧 deleteTokens() called');
+    console.log(`🔧 Deleting tokens for email: ${email}`);
+    
+    await this.initialize();
+    
+    try {
+      // First, get all tokens for this email
+      const tokens = await this.getTokensByEmail(email);
+      
+      if (tokens.length === 0) {
+        console.log(`✅ No tokens found for email: ${email}`);
+        return;
+      }
+      
+      // Delete each token
+      for (const token of tokens) {
+        await this.client.send(new DeleteCommand({
+          TableName: this.tableName,
+          Key: { jti: token.jti }
+        }));
+        console.log(`🔧 Deleted token: ${token.jti}`);
+      }
+      
+      console.log(`✅ Deleted ${tokens.length} tokens for email: ${email}`);
+    } catch (error) {
+      console.error('❌ Error deleting tokens from DynamoDB:', error);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      throw error;
+    }
+  }
+
   async cleanupExpiredTokens(): Promise<void> {
     console.log('🔧 cleanupExpiredTokens() called');
     

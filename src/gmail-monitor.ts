@@ -20,10 +20,8 @@ export class GmailMonitor {
       return false;
     }
 
-    if (tokenManager.isTokenExpired(token)) {
-      console.error('Token is expired. Please re-authenticate in the web app.');
-      return false;
-    }
+    // TokenManager.getToken() now automatically refreshes expired tokens
+    // So we don't need to check expiration here anymore
 
     const oauth2Client = new google.auth.OAuth2(
       token.client_id,
