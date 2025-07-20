@@ -73,16 +73,17 @@ let isStreamingMode = false;
 let streamingRes: any = null;
 
 // Initialize MCP server
-// const mcp = new McpServer(
-//   {
-//     name: 'mcp-email-agent',
-//     version: '1.0.0',
-//     title: 'MCP Email Agent',
-//     description: 'Remote MCP server for Gmail email monitoring and meeting detection',
-//   }
-// );
+const mcp = new McpServer({
+  name: 'mcp-email-agent',
+  version: '1.0.0',
+  title: 'MCP Email Agent',
+  description: 'Remote MCP server for Gmail email monitoring and meeting detection',
+});
 
 const gmailMonitor = new GmailMonitor(onNewGmailMessage);
+
+// Set up MCP server tools and resources
+setupMcpServer(mcp, gmailMonitor, sseManager);
 
 // Notification mechanism for connected clients
 function onNewGmailMessage(message: GmailMessage) {
@@ -257,14 +258,8 @@ app.post('/mcp', jwtAuthMiddleware.authenticateJWT, async (req: AuthenticatedReq
         delete transports[transport.sessionId];
       }
     };
-    const server = new McpServer({
-      name: "example-server",
-      version: "1.0.0"
-    });
-    setupMcpServer(server, gmailMonitor, sseManager);
-
     // Connect to the MCP server
-    await server.connect(transport);
+    await mcp.connect(transport);
   } else {
     // Invalid request
     res.status(400).json({
