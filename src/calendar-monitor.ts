@@ -62,12 +62,10 @@ export class CalendarMonitor {
   }
 
   /**
-   * Compute free slots for the next 2 days, default 9am-6pm, 30min slots
+   * Compute free slots for the given dates and timezone, default 9am-6pm, 30min slots
    */
-  public async getFreeSlots(): Promise<FreeSlot[]> {
+  public async getFreeSlotsForDates(dates: string[], timeZone: string): Promise<FreeSlot[]> {
     const events = await this.getBusyEvents();
-    const now = new Date();
-    const end = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
     const workingStartHour = 9;
     const workingEndHour = 18;
     const slotMinutes = 30;
@@ -79,17 +77,18 @@ export class CalendarMonitor {
       end: new Date(e.end.dateTime),
     }));
 
-    // For each day in the range
-    for (let d = new Date(now); d < end; d.setDate(d.getDate() + 1)) {
-      const day = new Date(d);
+    for (const dateStr of dates) {
+      let isoString = dateStr + 'T00:00:00' + (timeZone ? timeZone.replace('UTC', '') : '');
+      const day = new Date(isoString);
+      if (isNaN(day.getTime())) {
+        console.error(`Invalid date constructed: "${isoString}" from dateStr="${dateStr}" and timeZone="${timeZone}"`);
+        continue; // or throw, or skip this slot
+      }
       for (let hour = workingStartHour; hour < workingEndHour; hour++) {
         for (let min = 0; min < 60; min += slotMinutes) {
           const slotStart = new Date(day);
           slotStart.setHours(hour, min, 0, 0);
           const slotEnd = new Date(slotStart.getTime() + slotMinutes * 60000);
-          if (slotEnd > end) continue;
-          // Skip slots in the past
-          if (slotEnd <= now) continue;
           // Check overlap with busy intervals
           const overlaps = busyIntervals.some(busy =>
             slotStart < busy.end && slotEnd > busy.start
@@ -106,5 +105,18 @@ export class CalendarMonitor {
     // Sort by start time
     slots.sort((a, b) => a.start.localeCompare(b.start));
     return slots;
+  }
+
+  /**
+   * Compute free slots for the next 2 days, default 9am-6pm, 30min slots
+   */
+  public async getFreeSlots(): Promise<FreeSlot[]> {
+    const now = new Date();
+    const end = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    const dates: string[] = [];
+    for (let d = new Date(now); d < end; d.setDate(d.getDate() + 1)) {
+      dates.push(new Date(d).toISOString().slice(0, 10));
+    }
+    return this.getFreeSlotsForDates(dates, '');
   }
 } 

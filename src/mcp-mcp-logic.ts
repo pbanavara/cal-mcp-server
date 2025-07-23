@@ -183,4 +183,48 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
       };
     }
   );
+
+  mcp.tool(
+    "check_calendar_availability_for_dates",
+    "Check Google Calendar for free slots for specific dates and timezone (9am-6pm, 30min slots)",
+    {
+      parameters: {
+        type: "object",
+        properties: {
+          dates: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of date strings (YYYY-MM-DD)"
+          },
+          timeZone: {
+            type: "string",
+            description: "Timezone string (e.g., 'UTC+8')"
+          }
+        },
+        required: ["dates", "timeZone"]
+      },
+    },
+    async ({ dates, timeZone }) => {
+      const initialized = await calendarMonitor.initialize();
+      if (!initialized) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to initialize Google Calendar client."
+            }
+          ]
+        };
+      }
+      const slots: FreeSlot[] = await calendarMonitor.getFreeSlotsForDates(dates, timeZone);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(slots, null, 2)
+          }
+        ]
+      };
+    }
+  );
 } 
