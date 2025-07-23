@@ -141,4 +141,20 @@ export interface CalendarEvent {
 export interface FreeSlot {
   start: string; // ISO string
   end: string;   // ISO string
+}
+
+// Meeting intent extraction type from Claude
+export interface MeetingInfo {
+  extracted_preferences: {
+    date_range: string[];
+    preferred_days: string[];
+    preferred_time: string;
+  };
+  suggested_meeting_times: Array<{
+    date: string;
+    time_slots: string[];
+    timezone: string;
+  }>;
+  meeting_duration: string;
+  notes?: string;
 } 

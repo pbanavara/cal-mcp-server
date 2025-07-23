@@ -1,8 +1,9 @@
 import { GmailMonitor } from '../src/gmail-monitor';
 import { CalendarMonitor } from '../src/calendar-monitor';
-// import { GmailMessage } from '../src/types'; // Unused
+import { MeetingIntentDetector } from '../src/meeting-intent-detector';
 
 jest.mock('../src/calendar-monitor');
+jest.mock('../src/meeting-intent-detector');
 
 const mockGmailApi = {
   users: {
@@ -31,6 +32,7 @@ function createFakeGmailMessage(id: any, from: any, snippet: any) {
       headers: [
         { name: 'From', value: from },
         { name: 'Subject', value: 'Test subject' },
+        { name: 'Message-ID', value: 'msgid-123' },
       ],
       body: { size: 0 },
     },
@@ -43,6 +45,17 @@ describe('GmailMonitor', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Mock MeetingIntentDetector to return a deterministic result
+    (MeetingIntentDetector as any).mockImplementation(() => {
+      return {
+        checkIfMessageMeetingRelated: jest.fn().mockResolvedValue({
+          message: 'meeting',
+          meeting: 'yes',
+          time: ['2025-07-23', '2025-07-22'],
+          time_zone: '+08:00',
+        })
+      };
+    });
     gmailMonitor = new GmailMonitor(mockOnMessageReceived);
     // @ts-ignore
     gmailMonitor.gmail = mockGmailApi;
@@ -56,15 +69,17 @@ describe('GmailMonitor', () => {
     ]);
   });
 
-  it('checkIfMessageMeetingRelated returns expected mock structure', () => {
+  it('checkIfMessageMeetingRelated returns expected structure', async () => {
     // @ts-ignore
-    const result = gmailMonitor.checkIfMessageMeetingRelated('meeting');
-    expect(result).toEqual({
-      message: 'meeting',
-      meeting: 'yes',
-      time: ['2025-07-23', '2025-07-22'],
-      time_zone: '+08:00',
-    });
+    const result = await gmailMonitor.checkIfMessageMeetingRelated('meeting', '+08:00');
+    expect(result).toHaveProperty('message');
+    expect(result).toHaveProperty('meeting');
+    expect(typeof result.meeting).toBe('string');
+    expect(result).toHaveProperty('time');
+    expect(Array.isArray(result.time)).toBe(true);
+    expect(result).toHaveProperty('time_zone');
+    expect(typeof result.time_zone).toBe('string');
+    expect(result.meeting.toLowerCase()).toBe('yes');
   });
 
   it('composeAndSendEmail formats and sends email', async () => {

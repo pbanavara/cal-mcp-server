@@ -3,6 +3,8 @@ import { GmailMessage } from './types';
 import { tokenManager } from './token-manager';
 import 'dotenv/config';
 import { CalendarMonitor } from './calendar-monitor';
+import { MeetingIntentDetector } from './meeting-intent-detector';
+import { MeetingInfo } from './types';
 
 export class GmailMonitor {
   private gmail: any;
@@ -10,21 +12,18 @@ export class GmailMonitor {
   private onMessageReceived: (message: GmailMessage) => void;
   private seenMessageIds: Set<string> = new Set();
   private calendarMonitor: CalendarMonitor;
+  private meetingIntentDetector: MeetingIntentDetector;
 
   constructor(onMessageReceived: (message: GmailMessage) => void) {
     this.onMessageReceived = onMessageReceived;
     this.calendarMonitor = new CalendarMonitor();
+    this.meetingIntentDetector = new MeetingIntentDetector();
   }
 
-  // Mock method to check if a message is meeting related
-  private checkIfMessageMeetingRelated(message: string) {
-    // Mock: always returns a meeting for demonstration
-    return {
-      message,
-      meeting: 'yes',
-      time: ['2025-07-23', '2025-07-22'],
-      time_zone: '+08:00'
-    };
+  // Real method to check if a message is meeting related using Claude
+  private async checkIfMessageMeetingRelated(message: string, timeZone: string): Promise<any> {
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    return this.meetingIntentDetector.checkIfMessageMeetingRelated(message, today, timeZone);
   }
 
   public async initialize(): Promise<boolean> {
@@ -129,12 +128,23 @@ export class GmailMonitor {
 
         // --- New logic: check if meeting related and get calendar slots ---
         const snippet = (fullMsg.data as GmailMessage).snippet || '';
-        const meetingInfo = this.checkIfMessageMeetingRelated(snippet);
-        if (meetingInfo.meeting === 'yes') {
+        const defaultTimeZone = '+00:00';
+        let meetingInfo: MeetingInfo;
+        try {
+          meetingInfo = await this.checkIfMessageMeetingRelated(snippet, defaultTimeZone);
+        } catch (err) {
+          console.error('Error calling Claude for meeting intent:', err);
+          continue;
+        }
+        // Use the new structure: check if there are suggested meeting times
+        if (meetingInfo && meetingInfo.suggested_meeting_times && meetingInfo.suggested_meeting_times.length > 0) {
+          // Use all suggested dates and the timezone from the first suggestion
+          const dates = meetingInfo.suggested_meeting_times.map(s => s.date);
+          const timeZone = (meetingInfo.suggested_meeting_times[0] && meetingInfo.suggested_meeting_times[0].timezone) ? meetingInfo.suggested_meeting_times[0].timezone : defaultTimeZone;
           // Initialize calendar monitor if needed
           const initialized = await this.calendarMonitor.initialize();
           if (initialized) {
-            const slots = await this.calendarMonitor.getFreeSlotsForDates(meetingInfo.time, meetingInfo.time_zone);
+            const slots = await this.calendarMonitor.getFreeSlotsForDates(dates, timeZone);
             console.log('Available slots for meeting-related email:', JSON.stringify(slots, null, 2));
             // Extract sender email from headers
             const headers = (fullMsg.data as GmailMessage).payload?.headers || [];
@@ -155,7 +165,7 @@ export class GmailMonitor {
                 inReplyTo
               );
             } else {
-              console.log('Could not determine sender email to reply with available slots.');
+              console.log('Could not determine sender email to reply with available slots. Headers:', headers);
             }
           } else {
             console.log('Could not initialize CalendarMonitor for meeting-related email.');

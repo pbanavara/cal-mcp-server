@@ -12,6 +12,7 @@
     "webhook": "ts-node src/webhook-server.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.57.0",
     "@aws-sdk/client-dynamodb": "^3.848.0",
     "@aws-sdk/lib-dynamodb": "^3.848.0",
     "@google-cloud/pubsub": "^5.1.0",
@@ -24,6 +25,7 @@
     "googleapis": "^128.0.0",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
+    "openai": "^5.10.2",
     "ws": "^8.18.3"
   },
   "devDependencies": {
