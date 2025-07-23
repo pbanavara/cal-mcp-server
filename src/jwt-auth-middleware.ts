@@ -17,7 +17,7 @@ export class JWTAuthMiddleware {
   private readonly secret: string;
 
   constructor() {
-    this.secret = process.env['JWT_SECRET'] || process.env['NEXTAUTH_SECRET'] || 'fallback-secret-key';
+    this.secret = process.env['JWT_SECRET'] || 'fallback-secret-key';
   }
 
   /**

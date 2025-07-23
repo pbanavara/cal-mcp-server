@@ -128,4 +128,17 @@ export interface ServerConfig {
   gmailWatchTopic: string;
   gmailWatchSubscription: string;
   tokenFilePath: string;
+}
+
+// Calendar API Types
+export interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: { dateTime: string };
+  end: { dateTime: string };
+}
+
+export interface FreeSlot {
+  start: string; // ISO string
+  end: string;   // ISO string
 } 

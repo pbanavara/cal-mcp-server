@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { GmailMonitor } from './gmail-monitor';
 import { SSEManager } from './mcp-server-remote'; // If SSEManager is not exported, move its definition here or pass as argument
+import { CalendarMonitor } from './calendar-monitor';
+import { FreeSlot } from './types';
 
 export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseManager: SSEManager) {
   // MCP Tools
@@ -132,33 +134,6 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
   );
 
   mcp.tool(
-    "detect_meetings_in_email",
-    "Analyze an email for meeting-related content",
-    {
-      parameters: {
-        type: "object",
-        properties: {
-          messageId: {
-            type: "string",
-            description: "Gmail message ID"
-          }
-        },
-        required: ["messageId"]
-      },
-    },
-    async ({ messageId }) => {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Meeting detection feature not yet implemented. Message ID: ${messageId}`
-          }
-        ]
-      };
-    }
-  );
-
-  mcp.tool(
     "get_sse_status",
     "Get the current status of SSE connections",
     {
@@ -176,21 +151,33 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
     }
   );
 
-  // MCP Resources
-  mcp.resource(
-    "gmail_inbox",
-    "Gmail inbox messages",
+  // CalendarMonitor instance (singleton for now)
+  const calendarMonitor = new CalendarMonitor();
+
+  mcp.tool(
+    "check_calendar_availability",
+    "Check Google Calendar for free slots in the next 2 days (9am-6pm, 30min slots)",
     {
-      mimeType: "application/json",
-      description: "Current Gmail inbox messages"
+      parameters: {},
     },
     async () => {
+      const initialized = await calendarMonitor.initialize();
+      if (!initialized) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to initialize Google Calendar client."
+            }
+          ]
+        };
+      }
+      const slots: FreeSlot[] = await calendarMonitor.getFreeSlots();
       return {
-        contents: [
+        content: [
           {
-            uri: "gmail://inbox",
-            mimeType: "application/json",
-            text: JSON.stringify({ message: "Gmail inbox resource not yet implemented" }, null, 2)
+            type: "text",
+            text: JSON.stringify(slots, null, 2)
           }
         ]
       };

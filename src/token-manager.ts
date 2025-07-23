@@ -281,28 +281,6 @@ export class TokenManager {
     await this.loadTokensFromDynamoDB();
   }
 
-  public async getTokenByJTI(jti: string): Promise<TokenData | undefined> {
-    try {
-      const tokenRecord = await this.dynamoDBStorage.getTokens(jti);
-      if (tokenRecord) {
-        return {
-          access_token: tokenRecord.google_tokens.access_token,
-          refresh_token: tokenRecord.google_tokens.refresh_token,
-          expiry_date: tokenRecord.google_tokens.expiry_date,
-          scopes: tokenRecord.google_tokens.scopes || [],
-          user_email: tokenRecord.email,
-          client_id: process.env['GOOGLE_CLIENT_ID'] || '',
-          client_secret: process.env['GOOGLE_CLIENT_SECRET'] || '',
-          token_uri: 'https://oauth2.googleapis.com/token'
-        };
-      }
-      return undefined;
-    } catch (error) {
-      console.error('❌ Error getting token by JTI:', error);
-      return undefined;
-    }
-  }
-
   public async cleanupExpiredTokens(): Promise<void> {
     await this.dynamoDBStorage.cleanupExpiredTokens();
     // Reload tokens after cleanup
