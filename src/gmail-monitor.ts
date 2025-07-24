@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { CalendarMonitor } from './calendar-monitor';
 import { MeetingIntentDetector } from './meeting-intent-detector';
 import { MeetingInfo } from './types';
+import { simpleParser } from 'mailparser';
 
 export class GmailMonitor {
   private gmail: any;
@@ -71,27 +72,69 @@ export class GmailMonitor {
     }
   }
 
-  // Method to compose and send an email as a reply
-  private async composeAndSendEmail(to: string, subject: string, body: string, threadId?: string, inReplyTo?: string) {
+  // Method to compose and send an email as a reply, supporting HTML quoting
+  private async composeAndSendEmail(
+    to: string,
+    subject: string,
+    body: string,
+    threadId?: string,
+    inReplyTo?: string,
+    originalRaw?: string
+  ) {
     if (!this.gmail) {
       console.error('Gmail client not initialized');
       return;
     }
+    let originalHtml = '';
+    let originalText = '';
+    if (originalRaw) {
+      try {
+        const parsed = await simpleParser(Buffer.from(originalRaw, 'base64'));
+        originalHtml = parsed.html || '';
+        originalText = parsed.text || '';
+      } catch (err) {
+        console.error('Failed to parse original message for quoting:', err);
+      }
+    }
+    // Format quoted original
+    let quotedHtml = '';
+    let quotedText = '';
+    if (originalHtml) {
+      quotedHtml = `<div style="border-left:2px solid #ccc; margin:0 0 0 8px; padding-left:8px; color:#555;">${originalHtml}</div>`;
+    } else if (originalText) {
+      quotedText = originalText.split('\n').map(line => `&gt; ${line}`).join('<br>');
+      quotedHtml = `<div style="color:#555;">${quotedText}</div>`;
+    }
+    // Compose HTML reply
+    const htmlBody = `
+      <br>
+      ${body}
+      <br><br>
+      <div style="font-size:0.9em; color:#888;">On reply:</div>
+      ${quotedHtml}
+    `;
+    // Compose plain text reply
+    const textBody = `This is Amy's assistant responding. Here are some of the available slots, let me know which of these work for you:\n\n${body}\n\nOn reply:\n${originalText}`;
     try {
-      const headers = [
+      const messageParts = [
         `To: ${to}`,
-        'Content-Type: text/plain; charset=utf-8',
+        'Content-Type: multipart/alternative; boundary="boundary42"',
         'MIME-Version: 1.0',
         `Subject: ${subject}`,
-      ];
-      if (inReplyTo) {
-        headers.push(`In-Reply-To: <${inReplyTo}>`);
-        headers.push(`References: <${inReplyTo}>`);
-      }
-      const messageParts = [
-        ...headers,
+        ...(inReplyTo ? [
+          `In-Reply-To: <${inReplyTo}>`,
+          `References: <${inReplyTo}>`
+        ] : []),
         '',
-        body
+        '--boundary42',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        textBody,
+        '--boundary42',
+        'Content-Type: text/html; charset=utf-8',
+        '',
+        htmlBody,
+        '--boundary42--'
       ];
       const message = messageParts.join('\n');
       const encodedMessage = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -141,6 +184,10 @@ export class GmailMonitor {
           // Use all suggested dates and the timezone from the first suggestion
           const dates = meetingInfo.suggested_meeting_times.map(s => s.date);
           const timeZone = (meetingInfo.suggested_meeting_times[0] && meetingInfo.suggested_meeting_times[0].timezone) ? meetingInfo.suggested_meeting_times[0].timezone : defaultTimeZone;
+          
+          console.log('Claude suggested dates:', dates);
+          console.log('Claude suggested timezone:', timeZone);
+          
           // Initialize calendar monitor if needed
           const initialized = await this.calendarMonitor.initialize();
           if (initialized) {
@@ -152,17 +199,34 @@ export class GmailMonitor {
             const toEmail = fromHeader ? fromHeader.value.replace(/.*<(.+)>/, '$1').trim() : '';
             const threadId = (fullMsg.data as GmailMessage).threadId;
             const inReplyTo = headers.find(h => h.name.toLowerCase() === 'message-id')?.value;
+            const originalRaw = (fullMsg.data as GmailMessage).payload?.body?.data;
+            const subjectHeader = headers.find(h => h.name.toLowerCase() === 'subject');
+            const originalSubject = subjectHeader ? 
+              (subjectHeader.value.startsWith('Re:') ? subjectHeader.value : `Re: ${subjectHeader.value}`) : 
+              'Re: ';
             if (toEmail) {
               // Get the authenticated user's email for the assistant identity
               const token = await tokenManager.getToken();
               const assistantEmail = token?.user_email || 'your-assistant';
-              const body = `This is Amy <${assistantEmail}>'s assistant responding. Here are some of the available slots, let me know which of these work for you.\n\n${JSON.stringify(slots, null, 2)}`;
+              // Format up to 3 business-hours slots as a list
+              const businessSlots = slots.filter(slot => {
+                const hour = new Date(slot.start).getHours();
+                return hour >= 9 && hour < 18;
+              }).slice(0, 3);
+              const body = `This is Amy, ${assistantEmail}'s assistant. Here are some of the available Meeting Slots. Let me know what works for you`;
+              const formattedSlots = businessSlots.map(slot => {
+                const start = new Date(slot.start);
+                const end = new Date(slot.end);
+                return `• ${start.toLocaleDateString()} ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+              }).join('<br>');
+              const htmlContent = `${body}<br><br>${formattedSlots}`;
               await this.composeAndSendEmail(
                 toEmail,
-                'Available Meeting Slots',
-                body,
+                originalSubject,
+                htmlContent,
                 threadId,
-                inReplyTo
+                inReplyTo,
+                originalRaw
               );
             } else {
               console.log('Could not determine sender email to reply with available slots. Headers:', headers);

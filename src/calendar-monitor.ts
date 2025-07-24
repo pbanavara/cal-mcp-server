@@ -65,7 +65,12 @@ export class CalendarMonitor {
    * Compute free slots for the given dates and timezone, default 9am-6pm, 30min slots
    */
   public async getFreeSlotsForDates(dates: string[], timeZone: string): Promise<FreeSlot[]> {
+    console.log('Calendar monitor received dates:', dates);
+    console.log('Calendar monitor received timezone:', timeZone);
+    
     const events = await this.getBusyEvents();
+    console.log('Busy events found:', events.length);
+    
     const workingStartHour = 9;
     const workingEndHour = 18;
     const slotMinutes = 30;
@@ -76,13 +81,17 @@ export class CalendarMonitor {
       start: new Date(e.start.dateTime),
       end: new Date(e.end.dateTime),
     }));
+    
+    console.log('Busy intervals:', busyIntervals.map(b => ({ start: b.start.toISOString(), end: b.end.toISOString() })));
 
     for (const dateStr of dates) {
-      let isoString = dateStr + 'T00:00:00' + (timeZone ? timeZone.replace('UTC', '') : '');
-      const day = new Date(isoString);
+      // Create a date object for the given date
+      // We'll work in local timezone for simplicity and consistency
+      const day = new Date(dateStr + 'T00:00:00');
+      
       if (isNaN(day.getTime())) {
-        console.error(`Invalid date constructed: "${isoString}" from dateStr="${dateStr}" and timeZone="${timeZone}"`);
-        continue; // or throw, or skip this slot
+        console.error(`Invalid date constructed from dateStr="${dateStr}"`);
+        continue;
       }
       for (let hour = workingStartHour; hour < workingEndHour; hour++) {
         for (let min = 0; min < 60; min += slotMinutes) {
