@@ -4,7 +4,7 @@
   "description": "MCP server for Gmail email monitoring and meeting detection",
   "main": "dist/mcp-server-remote.js",
   "scripts": {
-    "build": "npm install && tsc",
+    "build": "tsc",
     "start": "node dist/mcp-server-remote.js",
     "dev": "ts-node src/mcp-server-remote.ts",
     "watch": "tsc --watch",
