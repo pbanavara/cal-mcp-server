@@ -7,18 +7,18 @@ import { FreeSlot } from './types';
 export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseManager: SSEManager) {
   // MCP Tools
   mcp.tool(
-    "start_watching_for_new_emails",
-    "Start polling for new emails using Gmail API",
+    "start_meeting_monitor",
+    "starts monitoring for emails and responds to meeting related requests automatically",
     {
       parameters: {},
     },
     async () => {
-      gmailMonitor.startPolling(60000); // Poll every 60 seconds
+      gmailMonitor.startPolling(30000); // Poll every 60 seconds
       return {
         content: [
           {
             type: "text",
-            text: "Started polling for new emails."
+            text: "Started meeting monitor - monitoring emails and responding to meeting requests automatically."
           }
         ]
       };
@@ -26,8 +26,8 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
   );
 
   mcp.tool(
-    "stop_watching_for_new_emails",
-    "Stop polling for new emails and exit streaming mode",
+    "stop_meeting_monitor",
+    "stops monitoring for emails and meeting requests",
     {
       parameters: {},
     },
@@ -38,7 +38,7 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
         content: [
           {
             type: "text",
-            text: "Stopped polling for new emails and exited streaming mode."
+            text: "Stopped meeting monitor - no longer monitoring emails or responding to meeting requests."
           }
         ]
       };
@@ -155,37 +155,7 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
   const calendarMonitor = new CalendarMonitor();
 
   mcp.tool(
-    "check_calendar_availability",
-    "Check Google Calendar for free slots in the next 2 days (9am-6pm, 30min slots)",
-    {
-      parameters: {},
-    },
-    async () => {
-      const initialized = await calendarMonitor.initialize();
-      if (!initialized) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Failed to initialize Google Calendar client."
-            }
-          ]
-        };
-      }
-      const slots: FreeSlot[] = await calendarMonitor.getFreeSlots();
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(slots, null, 2)
-          }
-        ]
-      };
-    }
-  );
-
-  mcp.tool(
-    "check_calendar_availability_for_dates",
+    "check_cal_avail_for_dates",
     "Check Google Calendar for free slots for specific dates and timezone (9am-6pm, 30min slots)",
     {
       parameters: {
@@ -227,4 +197,6 @@ export function setupMcpServer(mcp: McpServer, gmailMonitor: GmailMonitor, sseMa
       };
     }
   );
+
+
 } 

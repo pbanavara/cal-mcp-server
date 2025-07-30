@@ -277,13 +277,10 @@ app.post('/mcp', jwtAuthMiddleware.authenticateJWT, async (req: AuthenticatedReq
     return;
   }
 
-  // Handle the request
-  await transport.handleRequest(req, res, req.body);
-
   try {
-    // Check if this is a start_watching_for_new_emails request
+    // Check if this is a start_meeting_monitor request
     const isStartWatching = req.body?.method === 'tools/call' &&
-      req.body?.params?.name === 'start_watching_for_new_emails';
+      req.body?.params?.name === 'start_meeting_monitor';
 
     if (isStartWatching) {
       // Switch to streaming mode
@@ -307,7 +304,7 @@ app.post('/mcp', jwtAuthMiddleware.authenticateJWT, async (req: AuthenticatedReq
           content: [
             {
               type: "text",
-              text: "Started polling for new emails. Switching to streaming mode for real-time notifications."
+              text: "Started meeting monitor. Switching to streaming mode for real-time notifications."
             }
           ]
         }

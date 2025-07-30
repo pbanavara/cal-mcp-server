@@ -143,8 +143,8 @@ export interface FreeSlot {
   end: string;   // ISO string
 }
 
-// Meeting intent extraction type from Claude
-export interface MeetingInfo {
+// MeetingRequestContext and MeetingSlotAvailabilityResponse for slot checking and prompt building
+export interface MeetingRequestContext {
   extracted_preferences: {
     date_range: string[];
     preferred_days: string[];
@@ -155,6 +155,22 @@ export interface MeetingInfo {
     time_slots: string[];
     timezone: string;
   }>;
+  meeting_context: {
+    intent: string;
+    meeting_type: string;
+    mentions_slots: boolean;
+    user_action_required: string;
+  };
   meeting_duration: string;
-  notes?: string;
-} 
+  notes: string;
+}
+
+export interface MeetingSlotAvailabilityResponse {
+  request_object: MeetingRequestContext;
+  available: boolean;
+  available_slots: Array<{
+    date: string;
+    time_slot: string;
+    timezone: string;
+  }>;
+}

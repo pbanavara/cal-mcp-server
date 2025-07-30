@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { MeetingInfo } from './types';
+import { MeetingRequestContext } from './gmail-monitor';
 
 export class MeetingIntentDetector {
   private anthropic: Anthropic;
@@ -12,8 +12,64 @@ export class MeetingIntentDetector {
     this.anthropic = new Anthropic({ apiKey: key });
   }
 
-  async checkIfMessageMeetingRelated(emailText: string, today: string, timeZone: string): Promise<MeetingInfo> {
-    const prompt = `You are a smart assistant that helps schedule meetings.\n\nGiven the following message:\n---\n"${emailText}"\n---\n\n "in" ${timeZone} "\n---\n\n" 1. Understand the context of the email. For ex: lunch, dinner and suggest times based on the context and event. 2. Extract any preferred meeting windows (dates, days, time ranges).\n 3. Assume today's date is ${today}.\n3. Assume default meeting interval 30 mins\n4. Return a date range or a time range as an array\n5. Output should be in JSON\n6. Respond in the same time zone the request is coming from\n7. Respond ONLY with a valid JSON object, no markdown, no explanation, no code block.\n\nExample JSON format:\n{\n  \"extracted_preferences\": {\n    \"date_range\": [\"2025-07-24\"],\n    \"preferred_days\": [\"Thursday\"],\n    \"preferred_time\": \"Not specified\"\n  },\n  \"suggested_meeting_times\": [\n    {\n      \"date\": \"2025-07-24\",\n      \"time_slots\": [\"09:00-09:30\", \"09:30-10:00\"],\n      \"timezone\": \"+00:00\"\n    }\n  ],\n  \"meeting_duration\": \"30 minutes\",\n  \"notes\": \"No specific time mentioned, suggesting common business hours slots\"\n}`;
+  async checkIfMessageMeetingRelated(emailText: string, today: string, timeZone: string): Promise<boolean> {
+    const prompt = `You are an intelligent assistant who can parse strings and check if they relate to meetings or not. 
+
+Given the following email text: "${emailText}"
+Date: ${today}
+Timezone: ${timeZone}
+
+Determine if this email is related to scheduling, confirming, canceling, or discussing meetings.
+
+Respond with ONLY "true" if it's meeting-related, or "false" if it's not meeting-related.`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 10,
+        temperature: 0,
+        system: 'You are a meeting detection assistant. Respond only with "true" or "false".',
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      });
+
+      const content = response.content?.find(block => block.type === 'text')?.text || '';
+      const result = content.trim().toLowerCase();
+      
+      // Parse the boolean response
+      if (result === 'true') {
+        return true;
+      } else {
+        return false;
+      }
+    } catch (error) {
+      console.error('Error checking if message is meeting-related:', error);
+      // Default to false if there's an error
+      return false;
+    }
+  }
+
+
+  async getMeetingRequestContext(emailText: string, today: string, timeZone: string, freeSlots?: Array<{start: string, end: string}>): Promise<MeetingRequestContext> {
+    // Build free slots section for the prompt
+    let freeSlotsSection = '';
+    if (freeSlots && freeSlots.length > 0) {
+      const formattedSlots = freeSlots.map(slot => {
+        // Parse the ISO time and format it nicely
+        const start = new Date(slot.start);
+        const end = new Date(slot.end);
+        const date = start.toISOString().split('T')[0]; // YYYY-MM-DD
+        const startTime = start.toTimeString().substring(0, 5); // HH:MM
+        const endTime = end.toTimeString().substring(0, 5); // HH:MM
+        return `${date} ${startTime}-${endTime}`;
+      }).join('\n');
+      
+      freeSlotsSection = `\n\nAVAILABLE FREE SLOTS (9 AM - 6 PM business hours only):\n${formattedSlots}\n\nIMPORTANT: Only recommend meeting times that fall within these available free slots.`;
+      console.log('[For Claude API] Free slots section:', freeSlotsSection);
+    }
+
+    const prompt = `You are a smart assistant that helps schedule meetings.\n\nGiven the following message:\n---\n"${emailText}"\n---\nin time zone: ${timeZone}\nAssume today's date is: ${today}\n\nPlease perform the following:\n1. Classify the **meeting intent**: is the user confirming a time, requesting a time, proposing multiple times, cancelling, rescheduling, or being vague?\n2. Identify the **meeting type or context** if it's apparent: e.g., lunch, dinner, interview, sync, casual catch-up.\n3. Extract any preferred meeting windows (dates, days, time ranges) if mentioned.\n4. If a specific time is mentioned in the message AND it falls within available free slots ${freeSlotsSection}, return that time.\n5. If no specific time is mentioned or the requested time is not available, recommend 2-3 time slots from the available free slots that best match the user's preferences.\n6. Use the default meeting interval of 30 minutes for suggestions.\n7. Output all times in the same time zone the message came from.\n8. Return output in **strict JSON**, no markdown, no extra text, no code blocks.\n\nJSON format:\n{\n  "extracted_preferences": {\n    "date_range": ["2025-07-24"],\n    "preferred_days": ["Thursday"],\n    "preferred_time": "3:00 PM"\n  },\n  "suggested_meeting_times": [\n    {\n      "date": "2025-07-24",\n      "time_slots": ["15:00-15:30"],\n      "timezone": "-07:00"\n    }\n  ],\n  "meeting_context": {\n    "intent": "propose",\n    "meeting_type": "lunch",\n    "mentions_slots": true,\n    "user_action_required": "confirm"\n  },\n  "meeting_duration": "30 minutes",\n  "notes": "User proposed Monday 3 PM for lunch"\n}`;
 
     const model = 'claude-sonnet-4-20250514';
     try {
@@ -34,7 +90,7 @@ export class MeetingIntentDetector {
       try {
         // Remove markdown code block if present
         const cleaned = content.replace(/```json|```/g, '').trim();
-        return JSON.parse(cleaned) as MeetingInfo;
+        return JSON.parse(cleaned) as MeetingRequestContext;
       } catch (parseErr) {
         console.error('Failed to parse Claude response as JSON:', content, parseErr);
         throw parseErr;
@@ -42,6 +98,79 @@ export class MeetingIntentDetector {
     } catch (err: any) {
       console.error('[Claude API] Error:', err?.response?.data || err);
       throw err;
+    }
+  }
+
+  async generateEmailResponse(
+    originalEmailText: string, 
+    meetingContext: MeetingRequestContext,
+    senderName?: string
+  ): Promise<string> {
+    // Format available slots for the prompt
+    const availableSlots = meetingContext.suggested_meeting_times.flatMap(time => 
+      time.time_slots.map(slot => {
+        const [startTime] = slot.split('-');
+        return `${time.date} at ${startTime}`;
+      })
+    );
+
+    const senderInfo = senderName ? `to ${senderName}` : '';
+    const meetingType = meetingContext.meeting_context?.meeting_type || 'meeting';
+    const availableSlotsText = availableSlots.length > 0 
+      ? availableSlots.slice(0, 3).map((slot, index) => `${index + 1}. ${slot}`).join('\n')
+      : 'No immediate availability found';
+
+    const prompt = `You are an AI assistant helping to respond to meeting requests. Generate a professional, well-formatted email response.
+
+ORIGINAL EMAIL REQUEST:
+"${originalEmailText}"
+
+MEETING CONTEXT:
+- Meeting Type: ${meetingType}
+- Intent: ${meetingContext.meeting_context?.intent || 'unknown'}
+- Notes: ${meetingContext.notes || 'No additional notes'}
+
+AVAILABLE TIME SLOTS:
+${availableSlotsText}
+
+Please generate a professional email response ${senderInfo} that:
+1. Thanks them for their meeting request
+2. References the specific meeting type/context if relevant
+3. Provides the available time slots in a clean, numbered format
+4. Asks them to confirm or suggest alternatives
+5. Uses proper email formatting with line breaks between paragraphs
+6. Maintains a professional but friendly tone
+7. Signs off appropriately as an AI assistant
+
+If there are notes about why specific requested times aren't available, mention this diplomatically.
+
+IMPORTANT FORMATTING REQUIREMENTS:
+- Use \\n characters for line breaks between paragraphs
+- Use \\n\\n for paragraph spacing
+- Each major section should be separated by blank lines
+- The numbered time slots should be on separate lines
+
+Generate the email body ONLY (no subject line needed). Make sure to include proper \\n characters for line breaks.`;
+
+    try {
+      console.log('[Claude API] Generating email response...');
+      const response = await this.anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        temperature: 0.3,
+        system: 'You are a professional AI assistant helping with meeting scheduling. Generate well-formatted email responses.',
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      });
+
+      const content = response.content?.find(block => block.type === 'text')?.text || '';
+      console.log('[Claude API] Email response generated');
+      return content.trim();
+    } catch (err) {
+      console.error('[Claude API] Error generating email response:', err);
+      // Fallback to a simple response if Claude fails
+      return `Hi,\n\nThank you for your meeting request. I have some availability and will get back to you shortly with specific time options.\n\nBest regards,\nAI Assistant`;
     }
   }
 } 

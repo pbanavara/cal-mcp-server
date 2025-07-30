@@ -1,11 +1,16 @@
 import { google } from 'googleapis';
-import { GmailMessage } from './types';
+import { GmailMessage, MeetingRequestContext, MeetingSlotAvailabilityResponse } from './types';
 import { tokenManager } from './token-manager';
 import 'dotenv/config';
 import { CalendarMonitor } from './calendar-monitor';
 import { MeetingIntentDetector } from './meeting-intent-detector';
-import { MeetingInfo } from './types';
 import { simpleParser } from 'mailparser';
+// import { DateTime } from 'luxon'; // Removed as we simplified to use Claude for recommendations
+
+export type { MeetingRequestContext, MeetingSlotAvailabilityResponse };
+
+// REMOVED: Complex buildMeetingReplyPrompt function - replaced with simple Claude-based approach
+// The new approach uses MeetingIntentDetector.generateEmailResponse() which creates professional, well-formatted responses using Claude
 
 export class GmailMonitor {
   private gmail: any;
@@ -21,11 +26,7 @@ export class GmailMonitor {
     this.meetingIntentDetector = new MeetingIntentDetector();
   }
 
-  // Real method to check if a message is meeting related using Claude
-  private async checkIfMessageMeetingRelated(message: string, timeZone: string): Promise<any> {
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    return this.meetingIntentDetector.checkIfMessageMeetingRelated(message, today, timeZone);
-  }
+  // REMOVED: Redundant checkIfMessageMeetingRelated method - now using MeetingIntentDetector directly
 
   public async initialize(): Promise<boolean> {
     const token = await tokenManager.getToken();
@@ -98,23 +99,24 @@ export class GmailMonitor {
     }
     // Format quoted original
     let quotedHtml = '';
-    let quotedText = '';
+    let quotedTextForPlain = '';
     if (originalHtml) {
-      quotedHtml = `<div style="border-left:2px solid #ccc; margin:0 0 0 8px; padding-left:8px; color:#555;">${originalHtml}</div>`;
+      quotedHtml = `<div style="border-left:3px solid #ccc; margin:20px 0 0 0; padding-left:15px; color:#666; font-size:0.9em;">${originalHtml}</div>`;
+      quotedTextForPlain = originalText; // Use plain text version for text email
     } else if (originalText) {
-      quotedText = originalText.split('\n').map(line => `&gt; ${line}`).join('<br>');
-      quotedHtml = `<div style="color:#555;">${quotedText}</div>`;
+      quotedTextForPlain = originalText.split('\n').map(line => `> ${line}`).join('\n');
+      quotedHtml = `<div style="border-left:3px solid #ccc; margin:20px 0 0 0; padding-left:15px; color:#666; font-size:0.9em; white-space:pre-wrap;">${quotedTextForPlain.replace(/\n/g, '<br>')}</div>`;
     }
-    // Compose HTML reply
+    
+    // Compose HTML reply - convert \n to <br> tags for proper formatting
+    const bodyWithBreaks = body.replace(/\n/g, '<br>');
     const htmlBody = `
-      <br>
-      ${body}
-      <br><br>
-      <div style="font-size:0.9em; color:#888;">On reply:</div>
-      ${quotedHtml}
+      <div>${bodyWithBreaks}</div>
+      ${quotedHtml ? `<br><hr style="border:none; border-top:1px solid #eee; margin:20px 0;">` + quotedHtml : ''}
     `;
+    
     // Compose plain text reply
-    const textBody = `This is Amy's assistant responding. Here are some of the available slots, let me know which of these work for you:\n\n${body}\n\nOn reply:\n${originalText}`;
+    const textBody = quotedTextForPlain ? `${body}\n\n--- Original Message ---\n${quotedTextForPlain}` : body;
     try {
       const messageParts = [
         `To: ${to}`,
@@ -151,6 +153,51 @@ export class GmailMonitor {
     }
   }
 
+  // SIMPLIFIED: Let Claude handle slot recommendations based on free slots
+  public async checkMeetingSlotAvailability(
+    meetingContext: MeetingRequestContext
+  ): Promise<MeetingSlotAvailabilityResponse> {
+    console.log('🔄 Getting free slots and letting Claude recommend meeting times...');
+    
+    const dates = meetingContext.suggested_meeting_times.map(s => s.date);
+    const timeZone: string = (meetingContext.suggested_meeting_times[0]?.timezone) || '+00:00';
+    await this.calendarMonitor.initialize();
+    
+    // Get actual free slots from calendar
+    const freeSlots = await this.calendarMonitor.getActualFreeSlots(dates, timeZone);
+    console.log(`📋 Found ${freeSlots.length} actual free slots`);
+    
+    // Re-run Claude with free slots included to get proper recommendations
+    const emailText = `Meeting request for: ${meetingContext.meeting_context?.meeting_type || 'general meeting'}. 
+Preferred time: ${meetingContext.extracted_preferences?.preferred_time || 'flexible'}.
+User requirements: ${meetingContext.notes || 'No specific requirements'}.`;
+    
+    const today = new Date().toISOString().split('T')[0] || '';
+    const safeTimeZone = (timeZone || '+00:00') as string;
+    const updatedContext = await this.meetingIntentDetector.getMeetingRequestContext(
+      emailText, 
+      today, 
+      safeTimeZone, 
+      freeSlots
+    );
+    
+    console.log('✅ Claude has recommended slots based on available free time');
+    
+    return {
+      request_object: updatedContext,
+      available: updatedContext.suggested_meeting_times.length > 0,
+      available_slots: updatedContext.suggested_meeting_times.flatMap(time => 
+        time.time_slots.map(slot => ({
+          date: time.date,
+          time_slot: slot,
+          timezone: time.timezone || timeZone
+        }))
+      )
+    };
+  }
+
+
+
   private async pollUnreadMessages(): Promise<void> {
     if (!this.gmail) {
       console.error('Gmail client not initialized');
@@ -169,73 +216,111 @@ export class GmailMonitor {
         const fullMsg = await this.gmail.users.messages.get({ userId: 'me', id: msg.id });
         this.onMessageReceived(fullMsg.data as GmailMessage);
 
-        // --- New logic: check if meeting related and get calendar slots ---
+        // SIMPLIFIED: Check if meeting-related and get Claude's smart recommendations
         const snippet = (fullMsg.data as GmailMessage).snippet || '';
         const defaultTimeZone = '+00:00';
-        let meetingInfo: MeetingInfo;
+        const today = new Date().toISOString().slice(0, 10);
+        
         try {
-          meetingInfo = await this.checkIfMessageMeetingRelated(snippet, defaultTimeZone);
+          console.log('📧 Checking if message is meeting-related...');
+          const isMeetingRelated = await this.meetingIntentDetector.checkIfMessageMeetingRelated(snippet, today, defaultTimeZone);
+          if (!isMeetingRelated) {
+            console.log('❌ Message is not meeting related, no response needed');
+            // Mark as read even if not meeting-related to avoid reprocessing
+            try {
+              await this.gmail!.users.messages.modify({
+                userId: 'me',
+                id: msg.id!,
+                requestBody: {
+                  removeLabelIds: ['UNREAD']
+                }
+              });
+              console.log('✅ Non-meeting email marked as read');
+            } catch (markReadErr) {
+              console.error('⚠️ Failed to mark non-meeting email as read:', markReadErr);
+            }
+            continue;
+          }
+          
+          console.log('✅ Meeting-related message detected, getting Claude recommendations...');
+          
+          // Get calendar free slots
+          await this.calendarMonitor.initialize();
+          const dates = [today]; // For now, check today's availability
+          const freeSlots = await this.calendarMonitor.getActualFreeSlots(dates, defaultTimeZone);
+          
+          // Get Claude's smart recommendations based on free slots
+          const smartRecommendations = await this.meetingIntentDetector.getMeetingRequestContext(
+            snippet, 
+            today, 
+            defaultTimeZone, 
+            freeSlots
+          );
+          
+          console.log('🎯 Claude recommendations:', smartRecommendations);
+          
+          // Extract email info for reply
+          const headers = (fullMsg.data as GmailMessage).payload?.headers || [];
+          const fromHeader = headers.find(h => h.name.toLowerCase() === 'from');
+          const toEmail = fromHeader ? fromHeader.value.replace(/.*<(.+)>/, '$1').trim() : '';
+          const senderName = fromHeader ? 
+            fromHeader.value.replace(/<.*>/, '').replace(/['"]/g, '').trim() : '';
+          const subjectHeader = headers.find(h => h.name.toLowerCase() === 'subject');
+          const originalSubject = subjectHeader ? 
+            (subjectHeader.value.startsWith('Re:') ? subjectHeader.value : `Re: ${subjectHeader.value}`) : 
+            'Re: Meeting Request';
+          
+          if (toEmail) {
+            // Generate professional email response using Claude
+            const replyBody = await this.meetingIntentDetector.generateEmailResponse(
+              snippet, 
+              smartRecommendations, 
+              senderName
+            );
+            
+            // Get the full raw message for proper threading
+            let rawMessage = '';
+            try {
+              const rawMsg = await this.gmail!.users.messages.get({
+                userId: 'me',
+                id: msg.id!,
+                format: 'raw'
+              });
+              rawMessage = rawMsg.data.raw || '';
+            } catch (rawErr) {
+              console.warn('Could not fetch raw message for threading:', rawErr);
+            }
+            
+            await this.composeAndSendEmail(
+              toEmail,
+              originalSubject,
+              replyBody,
+              (fullMsg.data as GmailMessage).threadId,
+              headers.find(h => h.name.toLowerCase() === 'message-id')?.value,
+              rawMessage
+            );
+            console.log('📤 Smart meeting reply sent!');
+          } else {
+            console.log('❌ Could not determine sender email');
+          }
+          
+          // Mark the meeting-related email as read after processing (regardless of reply success)
+          try {
+            await this.gmail!.users.messages.modify({
+              userId: 'me',
+              id: msg.id!,
+              requestBody: {
+                removeLabelIds: ['UNREAD']
+              }
+            });
+            console.log('✅ Meeting email marked as read');
+          } catch (markReadErr) {
+            console.error('⚠️ Failed to mark meeting email as read:', markReadErr);
+          }
         } catch (err) {
-          console.error('Error calling Claude for meeting intent:', err);
+          console.error('❌ Error processing meeting message:', err);
           continue;
         }
-        // Use the new structure: check if there are suggested meeting times
-        if (meetingInfo && meetingInfo.suggested_meeting_times && meetingInfo.suggested_meeting_times.length > 0) {
-          // Use all suggested dates and the timezone from the first suggestion
-          const dates = meetingInfo.suggested_meeting_times.map(s => s.date);
-          const timeZone = (meetingInfo.suggested_meeting_times[0] && meetingInfo.suggested_meeting_times[0].timezone) ? meetingInfo.suggested_meeting_times[0].timezone : defaultTimeZone;
-          
-          console.log('Claude suggested dates:', dates);
-          console.log('Claude suggested timezone:', timeZone);
-          
-          // Initialize calendar monitor if needed
-          const initialized = await this.calendarMonitor.initialize();
-          if (initialized) {
-            const slots = await this.calendarMonitor.getFreeSlotsForDates(dates, timeZone);
-            console.log('Available slots for meeting-related email:', JSON.stringify(slots, null, 2));
-            // Extract sender email from headers
-            const headers = (fullMsg.data as GmailMessage).payload?.headers || [];
-            const fromHeader = headers.find(h => h.name.toLowerCase() === 'from');
-            const toEmail = fromHeader ? fromHeader.value.replace(/.*<(.+)>/, '$1').trim() : '';
-            const threadId = (fullMsg.data as GmailMessage).threadId;
-            const inReplyTo = headers.find(h => h.name.toLowerCase() === 'message-id')?.value;
-            const originalRaw = (fullMsg.data as GmailMessage).payload?.body?.data;
-            const subjectHeader = headers.find(h => h.name.toLowerCase() === 'subject');
-            const originalSubject = subjectHeader ? 
-              (subjectHeader.value.startsWith('Re:') ? subjectHeader.value : `Re: ${subjectHeader.value}`) : 
-              'Re: ';
-            if (toEmail) {
-              // Get the authenticated user's email for the assistant identity
-              const token = await tokenManager.getToken();
-              const assistantEmail = token?.user_email || 'your-assistant';
-              // Format up to 3 business-hours slots as a list
-              const businessSlots = slots.filter(slot => {
-                const hour = new Date(slot.start).getHours();
-                return hour >= 9 && hour < 18;
-              }).slice(0, 3);
-              const body = `This is Amy, ${assistantEmail}'s assistant. Here are some of the available Meeting Slots. Let me know what works for you`;
-              const formattedSlots = businessSlots.map(slot => {
-                const start = new Date(slot.start);
-                const end = new Date(slot.end);
-                return `• ${start.toLocaleDateString()} ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-              }).join('<br>');
-              const htmlContent = `${body}<br><br>${formattedSlots}`;
-              await this.composeAndSendEmail(
-                toEmail,
-                originalSubject,
-                htmlContent,
-                threadId,
-                inReplyTo,
-                originalRaw
-              );
-            } else {
-              console.log('Could not determine sender email to reply with available slots. Headers:', headers);
-            }
-          } else {
-            console.log('Could not initialize CalendarMonitor for meeting-related email.');
-          }
-        }
-        // --- End new logic ---
       }
     } catch (err) {
       console.error('Polling error:', err);
@@ -264,12 +349,6 @@ export class GmailMonitor {
         this.seenMessageIds.add(msg.id);
         const fullMsg = await this.gmail.users.messages.get({ userId: 'me', id: msg.id });
         newMessages.push(fullMsg.data as GmailMessage);
-        // Mark as read (remove UNREAD label)
-        await this.gmail.users.messages.modify({
-          userId: 'me',
-          id: msg.id,
-          requestBody: { removeLabelIds: ['UNREAD'] },
-        });
       }
       return newMessages;
     } catch (err) {

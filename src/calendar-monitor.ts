@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { CalendarEvent, FreeSlot } from './types';
 import { tokenManager } from './token-manager';
 import 'dotenv/config';
+import { DateTime } from 'luxon';
 
 export class CalendarMonitor {
   private calendar: any;
@@ -31,20 +32,34 @@ export class CalendarMonitor {
   }
 
   /**
-   * Get busy events for the next 2 days
+   * Get busy events for the specified dates
    */
-  public async getBusyEvents(): Promise<CalendarEvent[]> {
+  public async getBusyEvents(requestedDates?: string[]): Promise<CalendarEvent[]> {
     if (!this.calendar) {
       console.error('Calendar client not initialized');
       return [];
     }
-    const now = new Date();
-    const end = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 days from now
+    
+    let timeMin: Date;
+    let timeMax: Date;
+    
+    if (requestedDates && requestedDates.length > 0) {
+      // Use the requested date range
+      const sortedDates = requestedDates.sort();
+      timeMin = new Date(sortedDates[0] + 'T00:00:00Z');
+      timeMax = new Date(sortedDates[sortedDates.length - 1] + 'T23:59:59Z');
+    } else {
+      // Fallback to 2 days from now
+      const now = new Date();
+      timeMin = now;
+      timeMax = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 days from now
+    }
+    
     try {
       const res = await this.calendar.events.list({
         calendarId: 'primary',
-        timeMin: now.toISOString(),
-        timeMax: end.toISOString(),
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
         singleEvents: true,
         orderBy: 'startTime',
         maxResults: 100,
@@ -68,7 +83,7 @@ export class CalendarMonitor {
     console.log('Calendar monitor received dates:', dates);
     console.log('Calendar monitor received timezone:', timeZone);
     
-    const events = await this.getBusyEvents();
+    const events = await this.getBusyEvents(dates);
     console.log('Busy events found:', events.length);
     
     const workingStartHour = 9;
@@ -76,36 +91,56 @@ export class CalendarMonitor {
     const slotMinutes = 30;
     const slots: FreeSlot[] = [];
 
-    // Build busy intervals
+    // Build busy intervals using Luxon directly (no JS Date conversion)
     const busyIntervals = events.map(e => ({
-      start: new Date(e.start.dateTime),
-      end: new Date(e.end.dateTime),
+      start: DateTime.fromISO(e.start.dateTime),
+      end: DateTime.fromISO(e.end.dateTime),
     }));
     
-    console.log('Busy intervals:', busyIntervals.map(b => ({ start: b.start.toISOString(), end: b.end.toISOString() })));
+    console.log('Busy intervals:', busyIntervals.map(b => ({ start: b.start.toISO(), end: b.end.toISO() })));
 
     for (const dateStr of dates) {
-      // Create a date object for the given date
-      // We'll work in local timezone for simplicity and consistency
-      const day = new Date(dateStr + 'T00:00:00');
+      // Create base date in the specified timezone using Luxon - much simpler!
+      const baseDate = DateTime.fromISO(dateStr, { zone: timeZone });
       
-      if (isNaN(day.getTime())) {
-        console.error(`Invalid date constructed from dateStr="${dateStr}"`);
+      if (!baseDate.isValid) {
+        console.error(`Invalid date constructed from dateStr="${dateStr}" in timezone="${timeZone}". Error: ${baseDate.invalidReason}`);
         continue;
       }
+
       for (let hour = workingStartHour; hour < workingEndHour; hour++) {
         for (let min = 0; min < 60; min += slotMinutes) {
-          const slotStart = new Date(day);
-          slotStart.setHours(hour, min, 0, 0);
-          const slotEnd = new Date(slotStart.getTime() + slotMinutes * 60000);
-          // Check overlap with busy intervals
-          const overlaps = busyIntervals.some(busy =>
-            slotStart < busy.end && slotEnd > busy.start
-          );
+          // Create slot times using Luxon - handles timezone automatically
+          const slotStart = baseDate.set({ hour, minute: min, second: 0, millisecond: 0 });
+          const slotEnd = slotStart.plus({ minutes: slotMinutes });
+          
+          // Convert to UTC for comparison with busy intervals
+          const slotStartUTC = slotStart.toUTC();
+          const slotEndUTC = slotEnd.toUTC();
+          
+          // Check overlap with busy intervals (already Luxon DateTime objects)
+          const overlaps = busyIntervals.some(busy => {
+            const busyStartUTC = busy.start.toUTC();
+            const busyEndUTC = busy.end.toUTC();
+            
+            // Add buffer to prevent back-to-back meetings
+            const busyStartWithBuffer = busyStartUTC.minus({ minutes: 5 });
+            const busyEndWithBuffer = busyEndUTC.plus({ minutes: 5 });
+            
+            const hasOverlap = slotStartUTC < busyEndWithBuffer && slotEndUTC > busyStartWithBuffer;
+            console.log(`🔍 Checking overlap: Slot ${slotStartUTC.toISO()}-${slotEndUTC.toISO()} vs Busy+buffer ${busyStartWithBuffer.toISO()}-${busyEndWithBuffer.toISO()} = ${hasOverlap}`);
+            
+            if (hasOverlap) {
+              console.log(`🚫 CONFLICT: Slot conflicts with busy period (including 5min buffer)`);
+            }
+            
+            return hasOverlap;
+          });
+          
           if (!overlaps) {
             slots.push({
-              start: slotStart.toISOString(),
-              end: slotEnd.toISOString(),
+              start: slotStart.toISO(),
+              end: slotEnd.toISO(),
             });
           }
         }
@@ -117,15 +152,80 @@ export class CalendarMonitor {
   }
 
   /**
-   * Compute free slots for the next 2 days, default 9am-6pm, 30min slots
+   * Get actual free time slots for given dates and timezone within business hours
+   * This calculates gaps between busy events, which is more accurate than filtering all possible slots
    */
-  public async getFreeSlots(): Promise<FreeSlot[]> {
-    const now = new Date();
-    const end = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-    const dates: string[] = [];
-    for (let d = new Date(now); d < end; d.setDate(d.getDate() + 1)) {
-      dates.push(new Date(d).toISOString().slice(0, 10));
+  public async getActualFreeSlots(dates: string[], timeZone: string): Promise<FreeSlot[]> {
+    console.log('📅 Getting actual free slots for dates:', dates, 'in timezone:', timeZone);
+    
+    const events = await this.getBusyEvents(dates);
+    const freeSlots: FreeSlot[] = [];
+    
+    const workingStartHour = 9;
+    const workingEndHour = 18;
+    const slotMinutes = 30;
+    
+    for (const dateStr of dates) {
+      // Create business day boundaries in the specified timezone
+      const dayStart = DateTime.fromISO(dateStr, { zone: timeZone }).set({ 
+        hour: workingStartHour, minute: 0, second: 0, millisecond: 0 
+      });
+      const dayEnd = DateTime.fromISO(dateStr, { zone: timeZone }).set({ 
+        hour: workingEndHour, minute: 0, second: 0, millisecond: 0 
+      });
+      
+      // Get busy events for this specific date
+      const dayBusyEvents = events
+        .filter(event => {
+          const eventStart = DateTime.fromISO(event.start.dateTime);
+          return eventStart.toFormat('yyyy-MM-dd') === dateStr;
+        })
+        .map(event => ({
+          start: DateTime.fromISO(event.start.dateTime),
+          end: DateTime.fromISO(event.end.dateTime)
+        }))
+        .sort((a, b) => a.start.toMillis() - b.start.toMillis());
+      
+      console.log(`📊 Found ${dayBusyEvents.length} busy events for ${dateStr}`);
+      
+      // Find free slots as gaps between busy events
+      let currentTime = dayStart;
+      
+      for (const busyEvent of dayBusyEvents) {
+        // Add free slots before this busy event
+        while (currentTime < busyEvent.start && currentTime < dayEnd) {
+          const slotEnd = currentTime.plus({ minutes: slotMinutes });
+          
+          // Only add slot if it doesn't overlap with the busy event
+          if (slotEnd <= busyEvent.start) {
+            freeSlots.push({
+              start: currentTime.toISO()!,
+              end: slotEnd.toISO()!
+            });
+          }
+          
+          currentTime = currentTime.plus({ minutes: slotMinutes });
+        }
+        
+        // Skip past the busy event
+        currentTime = DateTime.max(currentTime, busyEvent.end);
+      }
+      
+      // Add remaining free slots after all busy events until end of day
+      while (currentTime < dayEnd) {
+        const slotEnd = currentTime.plus({ minutes: slotMinutes });
+        if (slotEnd <= dayEnd) {
+          freeSlots.push({
+            start: currentTime.toISO()!,
+            end: slotEnd.toISO()!
+          });
+        }
+        currentTime = currentTime.plus({ minutes: slotMinutes });
+      }
     }
-    return this.getFreeSlotsForDates(dates, '');
+    
+    console.log(`✅ Calculated ${freeSlots.length} actual free slots`);
+    return freeSlots;
   }
+
 } 
