@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { MeetingRequestContext } from './gmail-monitor';
+import { CalendarEvent } from './types';
 
 export class MeetingIntentDetector {
   private anthropic: Anthropic;
@@ -12,7 +13,7 @@ export class MeetingIntentDetector {
     this.anthropic = new Anthropic({ apiKey: key });
   }
 
-  async checkIfMessageMeetingRelated(emailText: string, today: string, timeZone: string): Promise<boolean> {
+  async checkIfMessageMeetingRelated(emailText: string, today: string, timeZone: string): Promise<Array<string>> {
     const prompt = `You are an intelligent assistant who can parse strings and check if they relate to meetings or not. 
 
 Given the following email text: "${emailText}"
@@ -21,7 +22,7 @@ Timezone: ${timeZone}
 
 Determine if this email is related to scheduling, confirming, canceling, or discussing meetings.
 
-Respond with ONLY "true" if it's meeting-related, or "false" if it's not meeting-related.`;
+Respond with the parsed dates if the message is meeting-related, or an empty list if the messsage is not meeting-related. Convert all dates to user's timezone`;
 
     try {
       const response = await this.anthropic.messages.create({
@@ -36,40 +37,35 @@ Respond with ONLY "true" if it's meeting-related, or "false" if it's not meeting
 
       const content = response.content?.find(block => block.type === 'text')?.text || '';
       const result = content.trim().toLowerCase();
-      
-      // Parse the boolean response
-      if (result === 'true') {
-        return true;
-      } else {
-        return false;
-      }
+      return result.split(',').map(date => date.trim());
     } catch (error) {
       console.error('Error checking if message is meeting-related:', error);
       // Default to false if there's an error
-      return false;
+      return [];
     }
   }
 
 
-  async getMeetingRequestContext(emailText: string, today: string, timeZone: string, freeSlots?: Array<{start: string, end: string}>): Promise<MeetingRequestContext> {
-    // Build free slots section for the prompt
-    let freeSlotsSection = '';
-    if (freeSlots && freeSlots.length > 0) {
-      const formattedSlots = freeSlots.map(slot => {
+  async getMeetingRequestContext(emailText: string, today: string, timeZone: string, busyEvents?: CalendarEvent[]): Promise<MeetingRequestContext> {
+    // Build busy events section for the prompt
+    let busyEventsSection = '';
+    if (busyEvents && busyEvents.length > 0) {
+      const formattedEvents = busyEvents.map(event => {
         // Parse the ISO time and format it nicely
-        const start = new Date(slot.start);
-        const end = new Date(slot.end);
+        const start = new Date(event.start.dateTime);
+        const end = new Date(event.end.dateTime);
         const date = start.toISOString().split('T')[0]; // YYYY-MM-DD
         const startTime = start.toTimeString().substring(0, 5); // HH:MM
         const endTime = end.toTimeString().substring(0, 5); // HH:MM
-        return `${date} ${startTime}-${endTime}`;
+        const summary = event.summary || 'Busy';
+        return `${date} ${startTime}-${endTime}: ${summary}`;
       }).join('\n');
       
-      freeSlotsSection = `\n\nAVAILABLE FREE SLOTS (9 AM - 6 PM business hours only):\n${formattedSlots}\n\nIMPORTANT: Only recommend meeting times that fall within these available free slots.`;
-      console.log('[For Claude API] Free slots section:', freeSlotsSection);
+      busyEventsSection = `\n\nBUSY TIME SLOTS (avoid these times):\n${formattedEvents}\n\nIMPORTANT: Do NOT schedule meetings during any of these busy times. Suggest alternative times that avoid conflicts.`;
+      console.log('[For Claude API] Busy events section:', busyEventsSection);
     }
 
-    const prompt = `You are a smart assistant that helps schedule meetings.\n\nGiven the following message:\n---\n"${emailText}"\n---\nin time zone: ${timeZone}\nAssume today's date is: ${today}\n\nPlease perform the following:\n1. Classify the **meeting intent**: is the user confirming a time, requesting a time, proposing multiple times, cancelling, rescheduling, or being vague?\n2. Identify the **meeting type or context** if it's apparent: e.g., lunch, dinner, interview, sync, casual catch-up.\n3. Extract any preferred meeting windows (dates, days, time ranges) if mentioned.\n4. If a specific time is mentioned in the message AND it falls within available free slots ${freeSlotsSection}, return that time.\n5. If no specific time is mentioned or the requested time is not available, recommend 2-3 time slots from the available free slots that best match the user's preferences.\n6. Use the default meeting interval of 30 minutes for suggestions.\n7. Output all times in the same time zone the message came from.\n8. Return output in **strict JSON**, no markdown, no extra text, no code blocks.\n\nJSON format:\n{\n  "extracted_preferences": {\n    "date_range": ["2025-07-24"],\n    "preferred_days": ["Thursday"],\n    "preferred_time": "3:00 PM"\n  },\n  "suggested_meeting_times": [\n    {\n      "date": "2025-07-24",\n      "time_slots": ["15:00-15:30"],\n      "timezone": "-07:00"\n    }\n  ],\n  "meeting_context": {\n    "intent": "propose",\n    "meeting_type": "lunch",\n    "mentions_slots": true,\n    "user_action_required": "confirm"\n  },\n  "meeting_duration": "30 minutes",\n  "notes": "User proposed Monday 3 PM for lunch"\n}`;
+    const prompt = `You are a smart assistant that helps schedule meetings.\n\nGiven the following message:\n---\n"${emailText}"\n---\nin time zone: ${timeZone}\nAssume today's date is: ${today}${busyEventsSection}\n\nPlease perform the following:\n1. Classify the **meeting intent**: is the user confirming a time, requesting a time, proposing multiple times, cancelling, rescheduling, or being vague?\n2. Identify the **meeting type or context** if it's apparent: e.g., lunch, dinner, interview, sync, casual catch-up.\n3. Extract any preferred meeting windows (dates, days, time ranges) if mentioned.\n4. If a specific time is mentioned in the message AND it does NOT conflict with busy times, return that time.\n5. If the requested time conflicts with busy slots or no specific time is mentioned, recommend 2-3 alternative time slots during business hours (9 AM - 6 PM) that avoid all busy periods.\n6. Use the default meeting interval of 30 minutes for suggestions.\n7. Output all times in the same time zone the message came from.\n8. Return output in **strict JSON**, no markdown, no extra text, no code blocks.\n\nJSON format:\n{\n  "extracted_preferences": {\n    "date_range": ["2025-07-24"],\n    "preferred_days": ["Thursday"],\n    "preferred_time": "3:00 PM"\n  },\n  "suggested_meeting_times": [\n    {\n      "date": "2025-07-24",\n      "time_slots": ["15:00-15:30"],\n      "timezone": "-07:00"\n    }\n  ],\n  "meeting_context": {\n    "intent": "propose",\n    "meeting_type": "lunch",\n    "mentions_slots": true,\n    "user_action_required": "confirm"\n  },\n  "meeting_duration": "30 minutes",\n  "notes": "User proposed Monday 3 PM for lunch"\n}`;
 
     const model = 'claude-sonnet-4-20250514';
     try {

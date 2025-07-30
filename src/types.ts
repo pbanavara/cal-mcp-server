@@ -46,6 +46,18 @@ export interface GmailWatchResponse {
   expiration: string;
 }
 
+// Email extraction types
+export interface EmailInfo {
+  toEmail: string;
+  senderName: string;
+  originalSubject: string;
+  headers: GmailHeader[];
+  messageId: string | undefined;
+}
+
+// Message processing types
+export type MessageType = 'meeting' | 'non-meeting';
+
 export interface GmailHistoryResponse {
   history: GmailHistory[];
   historyId: string;
